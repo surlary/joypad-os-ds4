@@ -14,6 +14,7 @@
 #include "core/router/router.h"
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
+#include "core/services/players/feedback.h"
 #include <string.h>
 #include <stdio.h>
 #include "pico/time.h"
@@ -96,6 +97,7 @@ typedef struct {
     uint32_t last_keepalive;
     bool nunchuk_connected;
     bool extension_connected;
+    uint8_t player_led;
 } wiimote_data_t;
 
 static wiimote_data_t wiimote_data[BTHID_MAX_DEVICES];
@@ -104,14 +106,20 @@ static wiimote_data_t wiimote_data[BTHID_MAX_DEVICES];
 // HELPER FUNCTIONS
 // ============================================================================
 
+// Set LEDs using raw pattern (bits 4-7 = LEDs 1-4)
+static void wiimote_set_leds_raw(bthid_device_t* device, uint8_t led_pattern)
+{
+    uint8_t buf[3] = { 0xA2, WII_CMD_LED, led_pattern };
+    btstack_wiimote_send_raw(device->conn_index, buf, sizeof(buf));
+}
+
 static void wiimote_set_leds(bthid_device_t* device, uint8_t player)
 {
     uint8_t led_pattern = 0;
     if (player >= 1 && player <= 4) {
         led_pattern = (1 << (player + 3));
     }
-    uint8_t buf[3] = { 0xA2, WII_CMD_LED, led_pattern };
-    btstack_wiimote_send_control(device->conn_index, buf, sizeof(buf));
+    wiimote_set_leds_raw(device, led_pattern);
 }
 
 static bool wiimote_request_status(bthid_device_t* device)
@@ -416,6 +424,7 @@ static void wiimote_task(bthid_device_t* device)
 
         case WII_STATE_SEND_LED:
             if (btstack_wiimote_can_send(device->conn_index)) {
+                wii->player_led = 0x10;  // LED1 = bit 4
                 wiimote_set_leds(device, 1);
                 wii->state = WII_STATE_WAIT_LED_ACK;
                 wii->init_time = now + 1000000;
@@ -431,6 +440,34 @@ static void wiimote_task(bthid_device_t* device)
             break;
 
         case WII_STATE_READY:
+            // Monitor feedback system for LED changes (player number passthrough)
+            {
+                int player_idx = find_player_index(wii->event.dev_addr, wii->event.instance);
+                if (player_idx >= 0) {
+                    feedback_state_t* fb = feedback_get_state(player_idx);
+
+                    // Check LED from feedback system
+                    // Feedback pattern: bits 0-3 for players 1-4 (0x01, 0x02, 0x04, 0x08)
+                    // Wiimote LED: bits 4-7 for LEDs 1-4 (0x10, 0x20, 0x40, 0x80)
+                    // Conversion: shift left by 4
+                    uint8_t led;
+                    if (fb->led.pattern != 0) {
+                        led = fb->led.pattern << 4;
+                    } else {
+                        led = PLAYER_LEDS[player_idx + 1] << 4;
+                    }
+
+                    if (fb->led_dirty || led != wii->player_led) {
+                        if (btstack_wiimote_can_send(device->conn_index)) {
+                            wii->player_led = led;
+                            wiimote_set_leds_raw(device, led);
+                            feedback_clear_dirty(player_idx);
+                        }
+                    }
+                }
+            }
+
+            // Send periodic status requests to keep connection alive
             if ((int32_t)(now - wii->last_keepalive) >= (WIIMOTE_KEEPALIVE_MS * 1000)) {
                 if (btstack_wiimote_can_send(device->conn_index)) {
                     wiimote_request_status(device);

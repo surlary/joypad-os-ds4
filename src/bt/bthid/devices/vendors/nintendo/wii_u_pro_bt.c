@@ -16,6 +16,7 @@
 #include "core/router/router.h"
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
+#include "core/services/players/feedback.h"
 #include <string.h>
 #include <stdio.h>
 #include "pico/time.h"
@@ -130,19 +131,24 @@ static uint8_t scale_stick(uint16_t val)
     return (uint8_t)scaled;
 }
 
-// Set LEDs on the controller (1-4 player indicators)
-static void wii_u_set_leds(bthid_device_t* device, uint8_t player)
+// Set LEDs on the controller using raw pattern (bits 4-7 = LEDs 1-4)
+static void wii_u_set_leds_raw(bthid_device_t* device, uint8_t led_pattern)
 {
     // LED command: report 0x11, LEDs in bits 4-7
     // Wiimote protocol: 0xA2 (DATA|OUTPUT) + report_id + data
+    // Send on INTERRUPT channel (some controllers reject commands on CONTROL channel)
+    uint8_t buf[3] = { 0xA2, 0x11, led_pattern };
+    btstack_wiimote_send_raw(device->conn_index, buf, sizeof(buf));
+}
+
+// Set LEDs on the controller (1-4 player indicators)
+static void wii_u_set_leds(bthid_device_t* device, uint8_t player)
+{
     uint8_t led_pattern = 0;
     if (player >= 1 && player <= 4) {
         led_pattern = (1 << (player + 3));  // LED1=0x10, LED2=0x20, etc.
     }
-
-    // Send on INTERRUPT channel (some controllers reject commands on CONTROL channel)
-    uint8_t buf[3] = { 0xA2, 0x11, led_pattern };
-    btstack_wiimote_send_raw(device->conn_index, buf, sizeof(buf));
+    wii_u_set_leds_raw(device, led_pattern);
 }
 
 // Request status report (report 0x15)
@@ -691,6 +697,7 @@ static void wii_u_task(bthid_device_t* device)
         case WII_U_STATE_SEND_LED:
             if (btstack_wiimote_can_send(device->conn_index)) {
                 printf("[WII_U_PRO] Sending LED command\n");
+                wii->player_led = 0x10;  // LED1 = bit 4
                 wii_u_set_leds(device, 1);
                 wii->state = WII_U_STATE_WAIT_LED_ACK;
                 wii->init_time = now + (1000 * 1000);
@@ -714,6 +721,35 @@ static void wii_u_task(bthid_device_t* device)
             break;
 
         case WII_U_STATE_READY:
+            // Monitor feedback system for LED changes (player number passthrough)
+            {
+                int player_idx = find_player_index(wii->event.dev_addr, wii->event.instance);
+                if (player_idx >= 0) {
+                    feedback_state_t* fb = feedback_get_state(player_idx);
+
+                    // Check LED from feedback system
+                    // Feedback pattern: bits 0-3 for players 1-4 (0x01, 0x02, 0x04, 0x08)
+                    // Wii U Pro LED: bits 4-7 for LEDs 1-4 (0x10, 0x20, 0x40, 0x80)
+                    // Conversion: shift left by 4
+                    uint8_t led;
+                    if (fb->led.pattern != 0) {
+                        // Use LED from host/feedback system
+                        led = fb->led.pattern << 4;
+                    } else {
+                        // Default to player index-based LED
+                        led = PLAYER_LEDS[player_idx + 1] << 4;
+                    }
+
+                    if (fb->led_dirty || led != wii->player_led) {
+                        if (btstack_wiimote_can_send(device->conn_index)) {
+                            wii->player_led = led;
+                            wii_u_set_leds_raw(device, led);
+                            feedback_clear_dirty(player_idx);
+                        }
+                    }
+                }
+            }
+
             // Send periodic status requests to keep connection alive
             if ((int32_t)(now - wii->last_keepalive) >= (WII_U_KEEPALIVE_MS * 1000)) {
                 if (btstack_wiimote_can_send(device->conn_index)) {
