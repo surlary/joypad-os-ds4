@@ -253,21 +253,31 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
             if (raw_buttons & WII_BTN_HOME)  buttons |= JP_BUTTON_A1;
 
             // Parse Nunchuk extension if present (report 0x32: buttons + 8 ext bytes)
-            if (report_id == WII_REPORT_BUTTONS_EXT8 && len >= 11 && wii->nunchuk_connected) {
-                // Extension bytes at offset 3-10
-                // Byte 3: joystick X (0-255, center ~128)
-                // Byte 4: joystick Y (0-255, center ~128)
-                // Bytes 5-7: accelerometer
-                // Byte 8: buttons (inverted) - bit 0 = Z, bit 1 = C
-                uint8_t joy_x = data[3];
-                uint8_t joy_y = data[4];
-                uint8_t ext_buttons = ~data[8];  // Invert
+            if (report_id == WII_REPORT_BUTTONS_EXT8 && len >= 11) {
+                if (wii->nunchuk_connected) {
+                    // Extension bytes at offset 3-10
+                    // Byte 3: joystick X (0-255, center ~128)
+                    // Byte 4: joystick Y (0-255, center ~128)
+                    // Bytes 5-7: accelerometer
+                    // Byte 8: buttons (inverted) - bit 0 = Z, bit 1 = C
+                    uint8_t joy_x = data[3];
+                    uint8_t joy_y = data[4];
+                    uint8_t ext_buttons = ~data[8];  // Invert
 
-                if (ext_buttons & 0x01) buttons |= JP_BUTTON_L2;  // Z
-                if (ext_buttons & 0x02) buttons |= JP_BUTTON_L1;  // C
+                    if (ext_buttons & 0x01) buttons |= JP_BUTTON_L2;  // Z
+                    if (ext_buttons & 0x02) buttons |= JP_BUTTON_L1;  // C
 
-                wii->event.analog[ANALOG_X] = joy_x;
-                wii->event.analog[ANALOG_Y] = 255 - joy_y;  // Invert Y
+                    wii->event.analog[ANALOG_X] = joy_x;
+                    wii->event.analog[ANALOG_Y] = 255 - joy_y;  // Invert Y
+                } else {
+                    // Debug: print extension data to help diagnose
+                    static uint32_t last_ext_debug = 0;
+                    if (time_us_32() - last_ext_debug > 2000000) {  // Every 2 seconds
+                        printf("[WIIMOTE] Ext data (nunchuk not detected): %02X %02X %02X %02X %02X %02X\n",
+                               data[3], data[4], data[5], data[6], data[7], data[8]);
+                        last_ext_debug = time_us_32();
+                    }
+                }
             }
 
             wii->event.buttons = buttons;
@@ -278,13 +288,16 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
         }
     }
 
-    // Status report
-    if (report_id == WII_REPORT_STATUS && len >= 7) {
-        uint8_t flags = data[4];
+    // Status report (0x20): [0]=id, [1-2]=buttons, [3]=LF (LED|flags), [4-5]=reserved, [6]=battery
+    // Flags in low nibble of byte 3: bit0=battery_low, bit1=extension, bit2=speaker, bit3=IR
+    if (report_id == WII_REPORT_STATUS && len >= 4) {
+        uint8_t lf_byte = data[3];
+        uint8_t flags = lf_byte & 0x0F;  // Low nibble is flags
         wii->extension_connected = (flags & 0x02) != 0;
 
+        printf("[WIIMOTE] Status: LF=0x%02X flags=0x%X ext=%d\n", lf_byte, flags, wii->extension_connected);
+
         if (wii->state == WII_STATE_WAIT_STATUS) {
-            printf("[WIIMOTE] Status: flags=0x%02X ext=%d\n", flags, wii->extension_connected);
             if (wii->extension_connected) {
                 wii->state = WII_STATE_SEND_EXT_INIT1;
             } else {
@@ -293,10 +306,12 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
         }
     }
 
-    // ACK report
+    // ACK report (0x22): [0]=id, [1-2]=buttons, [3]=report_acked, [4]=error
     if (report_id == WII_REPORT_ACK && len >= 5) {
-        uint8_t acked_report = data[4];
-        uint8_t error_code = data[5];
+        uint8_t acked_report = data[3];
+        uint8_t error_code = data[4];
+
+        printf("[WIIMOTE] ACK: report=0x%02X error=%d state=%d\n", acked_report, error_code, wii->state);
 
         if (error_code == 0) {
             if (wii->state == WII_STATE_WAIT_EXT_INIT1_ACK && acked_report == WII_CMD_WRITE_DATA) {
@@ -314,18 +329,40 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
     }
 
     // Read data response (extension type)
+    // Report 0x21 format: [0]=report_id, [1-2]=buttons, [3]=SE, [4-5]=addr, [6+]=data
     if (report_id == WII_REPORT_READ_DATA && len >= 7) {
-        if (wii->state == WII_STATE_WAIT_EXT_TYPE) {
-            // Check extension type at offset 7+
-            if (len >= 13) {
-                printf("[WIIMOTE] Extension: %02X %02X %02X %02X %02X %02X\n",
-                       data[7], data[8], data[9], data[10], data[11], data[12]);
+        uint8_t se = data[3];
+        uint8_t size = ((se >> 4) & 0x0F) + 1;
+        uint8_t error = se & 0x0F;
 
-                // Nunchuk: 00 00 A4 20 00 00
-                if (data[7] == 0x00 && data[10] == 0x00 && data[11] == 0x00) {
-                    printf("[WIIMOTE] Nunchuk detected!\n");
+        printf("[WIIMOTE] Read response: SE=0x%02X size=%d error=%d len=%d\n", se, size, error, len);
+
+        if (wii->state == WII_STATE_WAIT_EXT_TYPE) {
+            // Extension type data starts at offset 6
+            if (error == 0 && len >= 12) {
+                printf("[WIIMOTE] Extension type: %02X %02X %02X %02X %02X %02X\n",
+                       data[6], data[7], data[8], data[9], data[10], data[11]);
+
+                // Nunchuk identifiers:
+                // Decrypted: 00 00 A4 20 00 00
+                // Encrypted: FF 00 A4 20 00 00 (first byte 0xFF when encrypted)
+                // Key bytes are A4 20 at positions 2-3 (data[8-9])
+                if (data[8] == 0xA4 && data[9] == 0x20 && data[10] == 0x00 && data[11] == 0x00) {
+                    printf("[WIIMOTE] Nunchuk detected! (encrypted=%d)\n", data[6] == 0xFF);
                     wii->nunchuk_connected = true;
                 }
+                // Wii U Pro Controller: 00 00 A4 20 01 20
+                else if (data[8] == 0xA4 && data[9] == 0x20 && data[10] == 0x01 && data[11] == 0x20) {
+                    printf("[WIIMOTE] Wii U Pro extension detected\n");
+                    // Don't set nunchuk_connected, this is handled by wii_u_pro driver
+                }
+                // Any other extension with A4 20 signature - treat as generic extension
+                else if (data[8] == 0xA4 && data[9] == 0x20) {
+                    printf("[WIIMOTE] Unknown A4 20 extension, treating as Nunchuk\n");
+                    wii->nunchuk_connected = true;
+                }
+            } else if (error != 0) {
+                printf("[WIIMOTE] Extension read error: %d\n", error);
             }
             wii->state = WII_STATE_SEND_REPORT_MODE;
         }
