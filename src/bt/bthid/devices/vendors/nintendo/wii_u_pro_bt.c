@@ -287,8 +287,18 @@ static void wii_u_process_report(bthid_device_t* device, const uint8_t* data, ui
         // Report 0x3D: 21 extension bytes only (no core buttons, no accel)
         // This is the mode that works for Wii U Pro Controller
         if (wii->last_report == 0) {
-            printf("[WII_U_PRO] First data report (0x3D), controller ready!\n");
-            wii->state = WII_U_STATE_READY;
+            printf("[WII_U_PRO] First data report (0x3D)\n");
+            // Data report arrived - make sure we send LED before going to READY
+            if (wii->state < WII_U_STATE_WAIT_LED_ACK) {
+                // Haven't sent LED yet - do it now
+                printf("[WII_U_PRO] Data arrived before LED sent, sending LED now\n");
+                wii->state = WII_U_STATE_SEND_LED;
+            } else if (wii->state == WII_U_STATE_WAIT_LED_ACK) {
+                // Already sent LED, waiting for ACK - go to READY
+                printf("[WII_U_PRO] LED already sent, controller ready!\n");
+                wii->state = WII_U_STATE_READY;
+            }
+            // If already READY, don't change state
         }
         wii->last_report = time_us_32();
 
@@ -349,14 +359,18 @@ static void wii_u_process_report(bthid_device_t* device, const uint8_t* data, ui
 
     } else if (report_id == WIIU_REPORT_EXT_16 && len >= 22) {
         // Report 0x35: Core buttons (2) + Accel (3) + Extension (16) = 21 bytes total
-        // We got a valid report - transition to READY state
-        if (wii->state != WII_U_STATE_READY) {
-            printf("[WII_U_PRO] Received first data report (0x35), controller ready!\n");
-            wii->state = WII_U_STATE_READY;
-        }
-        // Track report timing for debugging
         if (wii->last_report == 0) {
-            printf("[WII_U_PRO] First data report received! len=%d\n", len);
+            printf("[WII_U_PRO] First data report (0x35)\n");
+            // Data report arrived - make sure we send LED before going to READY
+            if (wii->state < WII_U_STATE_WAIT_LED_ACK) {
+                // Haven't sent LED yet - do it now
+                printf("[WII_U_PRO] Data arrived before LED sent, sending LED now\n");
+                wii->state = WII_U_STATE_SEND_LED;
+            } else if (wii->state == WII_U_STATE_WAIT_LED_ACK) {
+                // Already sent LED, waiting for ACK - go to READY
+                printf("[WII_U_PRO] LED already sent, controller ready!\n");
+                wii->state = WII_U_STATE_READY;
+            }
         }
         wii->last_report = time_us_32();
 
