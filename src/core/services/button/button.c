@@ -121,7 +121,10 @@ static button_event_t fire_event(button_event_t event)
 
 void button_init(void)
 {
-#ifdef USE_BOOTSEL_BUTTON
+#ifdef DISABLE_BUTTON_SERVICE
+    printf("[button] Button service disabled for this board\n");
+    return;
+#elif defined(USE_BOOTSEL_BUTTON)
     printf("[button] Initializing BOOTSEL button\n");
     // No GPIO init needed - BOOTSEL is on QSPI CS pin
 #else
@@ -145,6 +148,9 @@ void button_init(void)
 
 button_event_t button_task(void)
 {
+#ifdef DISABLE_BUTTON_SERVICE
+    return BUTTON_EVENT_NONE;
+#endif
     bool pressed = read_button_debounced();
     button_event_t event = BUTTON_EVENT_NONE;
 
