@@ -7,6 +7,7 @@
 #include "devices/vendors/sony/ds3_bt.h"
 #include "devices/vendors/sony/ds4_bt.h"
 #include "devices/vendors/sony/ds5_bt.h"
+#include "core/services/storage/flash.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -380,6 +381,9 @@ void bt_on_disconnect(uint8_t conn_index)
 {
     printf("[BTHID] Disconnect on connection %d\n", conn_index);
     remove_device(conn_index);
+
+    // Check if we have pending flash writes now that BT may be idle
+    flash_on_bt_disconnect();
 }
 
 static bool bt_on_hid_report_debug_done = false;

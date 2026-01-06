@@ -159,6 +159,7 @@ typedef struct {
     uint8_t player_led;
     bool rumble_on;
     wiimote_orient_t orientation;
+    bool orient_hotkey_active;  // Prevent repeated hotkey triggers
 } wiimote_data_t;
 
 static wiimote_data_t wiimote_data[BTHID_MAX_DEVICES];
@@ -378,6 +379,37 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
             if (raw_buttons & WII_BTN_MINUS) buttons |= JP_BUTTON_S1;
             if (raw_buttons & WII_BTN_PLUS)  buttons |= JP_BUTTON_S2;
             if (raw_buttons & WII_BTN_HOME)  buttons |= JP_BUTTON_A1;
+
+            // Orientation hotkeys: S2 (Plus) + D-pad Up = Vertical, S2 + Right = Horizontal, S2 + Down = Auto
+            // Flash save is deferred until BT disconnects to avoid timing issues
+            bool plus_held = (raw_buttons & WII_BTN_PLUS) != 0;
+            bool up_held = (raw_buttons & WII_BTN_UP) != 0;
+            bool down_held = (raw_buttons & WII_BTN_DOWN) != 0;
+            bool right_held = (raw_buttons & WII_BTN_RIGHT) != 0;
+
+            if (plus_held && (up_held || down_held || right_held)) {
+                if (!wii->orient_hotkey_active) {
+                    wii->orient_hotkey_active = true;
+                    uint8_t new_mode = up_held ? WII_ORIENT_MODE_VERTICAL :
+                                       right_held ? WII_ORIENT_MODE_HORIZONTAL :
+                                       WII_ORIENT_MODE_AUTO;
+                    if (new_mode != wiimote_orient_mode) {
+                        wiimote_orient_mode = new_mode;
+                        printf("[WIIMOTE] Hotkey: orientation set to %s\n",
+                               wiimote_get_orient_mode_name(wiimote_orient_mode));
+                        // Queue flash save (deferred until BT disconnects)
+                        flash_t flash_data;
+                        if (flash_load(&flash_data)) {
+                            flash_data.wiimote_orient_mode = wiimote_orient_mode;
+                            flash_save(&flash_data);
+                        }
+                    }
+                }
+                // Consume the hotkey buttons so they don't pass through
+                buttons &= ~(JP_BUTTON_S2 | JP_BUTTON_DU | JP_BUTTON_DD | JP_BUTTON_DR);
+            } else {
+                wii->orient_hotkey_active = false;
+            }
 
             // Determine orientation based on mode setting
             // For forced modes, apply immediately without needing accelerometer data
