@@ -269,8 +269,12 @@ static struct {
 // Wiimotes don't work well with BTstack's hid_host layer.
 // We bypass it and create L2CAP channels directly, like USB Host Shield does.
 
+#ifndef PSM_HID_CONTROL
 #define PSM_HID_CONTROL   0x0011
+#endif
+#ifndef PSM_HID_INTERRUPT
 #define PSM_HID_INTERRUPT 0x0013
+#endif
 
 typedef enum {
     WIIMOTE_STATE_IDLE,

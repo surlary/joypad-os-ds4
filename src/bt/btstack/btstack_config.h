@@ -35,13 +35,19 @@
 // ============================================================================
 
 // Enable BLE (Bluetooth Low Energy)
+// Use #ifndef to avoid redefinition when pico_btstack_ble is linked
+#ifndef ENABLE_BLE
 #define ENABLE_BLE
+#endif
 #define ENABLE_LE_CENTRAL
 #define ENABLE_LE_PERIPHERAL
 #define ENABLE_LE_SECURE_CONNECTIONS
 
 // Enable Classic Bluetooth
+// Use #ifndef to avoid redefinition when pico_btstack_classic is linked
+#ifndef ENABLE_CLASSIC
 #define ENABLE_CLASSIC
+#endif
 
 // Enable logging
 #define ENABLE_LOG_ERROR
