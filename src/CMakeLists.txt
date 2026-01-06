@@ -553,6 +553,7 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
         CYW43_LWIP=0
         # BTstack uses async_context, not embedded run loop
         BTSTACK_USE_CYW43=1
+        ENABLE_BTSTACK=1
     )
     target_sources(joypad_bt2usb PUBLIC
         ${CORE_SOURCES}
