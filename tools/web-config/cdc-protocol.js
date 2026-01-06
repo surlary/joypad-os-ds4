@@ -390,6 +390,14 @@ class CDCProtocol {
     async clearBtBonds() {
         return this.sendCommand('BT.BONDS.CLEAR');
     }
+
+    async getWiimoteOrient() {
+        return this.sendCommand('WIIMOTE.ORIENT.GET');
+    }
+
+    async setWiimoteOrient(mode) {
+        return this.sendCommand('WIIMOTE.ORIENT.SET', { mode });
+    }
 }
 
 // Export for module use

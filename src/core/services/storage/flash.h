@@ -14,7 +14,8 @@ typedef struct {
     uint32_t magic;              // Validation magic number (0x47435052 = "GCPR")
     uint8_t active_profile_index; // Currently selected profile (0-N)
     uint8_t usb_output_mode;     // USB device output mode (0=HID, 1=XboxOG, etc.)
-    uint8_t reserved[250];        // Reserved for future settings (padding to 256 bytes)
+    uint8_t wiimote_orient_mode; // Wiimote orientation mode (0=Auto, 1=Horizontal, 2=Vertical)
+    uint8_t reserved[249];        // Reserved for future settings (padding to 256 bytes)
 } flash_t;
 
 // Initialize flash settings system

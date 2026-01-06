@@ -16,8 +16,9 @@
 #include <stdlib.h>
 
 // Optional BT support
-#ifdef CONFIG_BLUETOOTH
+#ifdef ENABLE_BTSTACK
 #include "bt/btstack/btstack_host.h"
+#include "bt/bthid/devices/vendors/nintendo/wiimote_bt.h"
 #endif
 
 // ============================================================================
@@ -355,7 +356,7 @@ static void cmd_settings_reset(const char* json)
     while(1);
 }
 
-#ifdef CONFIG_BLUETOOTH
+#ifdef ENABLE_BTSTACK
 static void cmd_bt_status(const char* json)
 {
     (void)json;
@@ -372,6 +373,42 @@ static void cmd_bt_bonds_clear(const char* json)
     (void)json;
     btstack_host_delete_all_bonds();
     send_ok();
+}
+
+static void cmd_wiimote_orient_get(const char* json)
+{
+    (void)json;
+    uint8_t mode = wiimote_get_orient_mode();
+    snprintf(response_buf, sizeof(response_buf),
+             "{\"mode\":%d,\"name\":\"%s\"}",
+             mode, wiimote_get_orient_mode_name(mode));
+    send_json(response_buf);
+}
+
+static void cmd_wiimote_orient_set(const char* json)
+{
+    int mode;
+    if (!json_get_int(json, "mode", &mode)) {
+        send_error("missing mode");
+        return;
+    }
+    if (mode < 0 || mode > 2) {
+        send_error("invalid mode (0=auto, 1=horizontal, 2=vertical)");
+        return;
+    }
+    wiimote_set_orient_mode((uint8_t)mode);
+
+    // Save to flash
+    flash_t flash_data;
+    if (flash_load(&flash_data)) {
+        flash_data.wiimote_orient_mode = (uint8_t)mode;
+        flash_save(&flash_data);
+    }
+
+    snprintf(response_buf, sizeof(response_buf),
+             "{\"mode\":%d,\"name\":\"%s\"}",
+             mode, wiimote_get_orient_mode_name(mode));
+    send_json(response_buf);
 }
 #endif
 
@@ -400,9 +437,11 @@ static const cmd_entry_t commands[] = {
     {"INPUT.STREAM", cmd_input_stream},
     {"SETTINGS.GET", cmd_settings_get},
     {"SETTINGS.RESET", cmd_settings_reset},
-#ifdef CONFIG_BLUETOOTH
+#ifdef ENABLE_BTSTACK
     {"BT.STATUS", cmd_bt_status},
     {"BT.BONDS.CLEAR", cmd_bt_bonds_clear},
+    {"WIIMOTE.ORIENT.GET", cmd_wiimote_orient_get},
+    {"WIIMOTE.ORIENT.SET", cmd_wiimote_orient_set},
 #endif
     {NULL, NULL}
 };

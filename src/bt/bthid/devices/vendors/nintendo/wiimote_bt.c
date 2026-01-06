@@ -15,6 +15,7 @@
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
+#include "core/services/storage/flash.h"
 #include <string.h>
 #include <stdio.h>
 #include "pico/time.h"
@@ -136,11 +137,15 @@ typedef enum {
     WII_STATE_READY
 } wiimote_state_t;
 
-// Wiimote orientation (based on accelerometer)
+// Wiimote orientation (current detected state)
 typedef enum {
     WII_ORIENT_HORIZONTAL,  // Sideways like NES controller (D-pad on left)
     WII_ORIENT_VERTICAL,    // Pointing at screen (D-pad on top)
 } wiimote_orient_t;
+
+// Global orientation mode setting (shared across all Wiimotes)
+// Uses WII_ORIENT_MODE_* constants from header
+static uint8_t wiimote_orient_mode = WII_ORIENT_MODE_AUTO;
 
 typedef struct {
     input_event_t event;
@@ -374,28 +379,33 @@ static void wiimote_process_report(bthid_device_t* device, const uint8_t* data, 
             if (raw_buttons & WII_BTN_PLUS)  buttons |= JP_BUTTON_S2;
             if (raw_buttons & WII_BTN_HOME)  buttons |= JP_BUTTON_A1;
 
-            // Parse accelerometer from reports that include it
-            // Report 0x31: [0]=id, [1-2]=buttons, [3-5]=accel
-            // Report 0x35: [0]=id, [1-2]=buttons, [3-5]=accel, [6-21]=extension
-            bool has_accel = (report_id == WII_REPORT_BUTTONS_ACC ||
-                              report_id == WII_REPORT_BUTTONS_ACC_EXT16 ||
-                              report_id == WII_REPORT_BUTTONS_ACC_IR ||
-                              report_id == WII_REPORT_BUTTONS_ACC_IR_EXT6);
-
-            if (has_accel && len >= 6) {
-                uint8_t accel_x = data[3];
-                uint8_t accel_y = data[4];
-                uint8_t accel_z = data[5];
-
-                // Detect orientation from accelerometer (with hysteresis)
-                wiimote_orient_t new_orient = wiimote_detect_orientation(accel_x, wii->orientation);
-
-                // Only log orientation changes
-                if (new_orient != wii->orientation) {
-                    printf("[WIIMOTE] Orientation: %s\n",
-                           new_orient == WII_ORIENT_HORIZONTAL ? "HORIZONTAL" : "VERTICAL");
-                    wii->orientation = new_orient;
+            // Determine orientation based on mode setting
+            // For forced modes, apply immediately without needing accelerometer data
+            wiimote_orient_t new_orient = wii->orientation;
+            if (wiimote_orient_mode == WII_ORIENT_MODE_HORIZONTAL) {
+                new_orient = WII_ORIENT_HORIZONTAL;
+            } else if (wiimote_orient_mode == WII_ORIENT_MODE_VERTICAL) {
+                new_orient = WII_ORIENT_VERTICAL;
+            } else {
+                // Auto mode: detect from accelerometer if available
+                // Report 0x31: [0]=id, [1-2]=buttons, [3-5]=accel
+                // Report 0x35: [0]=id, [1-2]=buttons, [3-5]=accel, [6-21]=extension
+                bool has_accel = (report_id == WII_REPORT_BUTTONS_ACC ||
+                                  report_id == WII_REPORT_BUTTONS_ACC_EXT16 ||
+                                  report_id == WII_REPORT_BUTTONS_ACC_IR ||
+                                  report_id == WII_REPORT_BUTTONS_ACC_IR_EXT6);
+                if (has_accel && len >= 6) {
+                    uint8_t accel_x = data[3];
+                    new_orient = wiimote_detect_orientation(accel_x, wii->orientation);
                 }
+            }
+
+            // Only log orientation changes
+            if (new_orient != wii->orientation) {
+                printf("[WIIMOTE] Orientation: %s (mode=%d)\n",
+                       new_orient == WII_ORIENT_HORIZONTAL ? "HORIZONTAL" : "VERTICAL",
+                       wiimote_orient_mode);
+                wii->orientation = new_orient;
             }
 
             // Determine extension data offset based on report type
@@ -863,6 +873,35 @@ static void wiimote_disconnect(bthid_device_t* device)
 }
 
 // ============================================================================
+// ORIENTATION MODE API
+// ============================================================================
+
+uint8_t wiimote_get_orient_mode(void)
+{
+    return wiimote_orient_mode;
+}
+
+void wiimote_set_orient_mode(uint8_t mode)
+{
+    if (mode <= WII_ORIENT_MODE_VERTICAL) {
+        wiimote_orient_mode = mode;
+        printf("[WIIMOTE] Orientation mode set to: %s\n",
+               mode == WII_ORIENT_MODE_AUTO ? "AUTO" :
+               mode == WII_ORIENT_MODE_HORIZONTAL ? "HORIZONTAL" : "VERTICAL");
+    }
+}
+
+const char* wiimote_get_orient_mode_name(uint8_t mode)
+{
+    switch (mode) {
+        case WII_ORIENT_MODE_AUTO: return "Auto";
+        case WII_ORIENT_MODE_HORIZONTAL: return "Horizontal";
+        case WII_ORIENT_MODE_VERTICAL: return "Vertical";
+        default: return "Unknown";
+    }
+}
+
+// ============================================================================
 // DRIVER STRUCT
 // ============================================================================
 
@@ -877,5 +916,15 @@ const bthid_driver_t wiimote_bt_driver = {
 
 void wiimote_bt_register(void)
 {
+    // Load orientation mode from flash
+    flash_t flash_data;
+    if (flash_load(&flash_data)) {
+        if (flash_data.wiimote_orient_mode <= WII_ORIENT_MODE_VERTICAL) {
+            wiimote_orient_mode = flash_data.wiimote_orient_mode;
+            printf("[WIIMOTE] Loaded orientation mode from flash: %s\n",
+                   wiimote_get_orient_mode_name(wiimote_orient_mode));
+        }
+    }
+
     bthid_register_driver(&wiimote_bt_driver);
 }

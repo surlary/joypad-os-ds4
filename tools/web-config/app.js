@@ -26,6 +26,7 @@ class JoypadConfigApp {
         this.mainContent = document.getElementById('mainContent');
         this.modeSelect = document.getElementById('modeSelect');
         this.profileSelect = document.getElementById('profileSelect');
+        this.wiimoteOrientSelect = document.getElementById('wiimoteOrientSelect');
         this.streamBtn = document.getElementById('streamBtn');
         this.logEl = document.getElementById('log');
 
@@ -45,6 +46,7 @@ class JoypadConfigApp {
         this.connectBtn2.addEventListener('click', () => this.connect());
         this.modeSelect.addEventListener('change', (e) => this.setMode(e.target.value));
         this.profileSelect.addEventListener('change', (e) => this.setProfile(e.target.value));
+        this.wiimoteOrientSelect.addEventListener('change', (e) => this.setWiimoteOrient(e.target.value));
         this.streamBtn.addEventListener('click', () => this.toggleStreaming());
 
         document.getElementById('clearBtBtn').addEventListener('click', () => this.clearBtBonds());
@@ -98,6 +100,7 @@ class JoypadConfigApp {
             await this.loadDeviceInfo();
             await this.loadModes();
             await this.loadProfiles();
+            await this.loadWiimoteOrient();
 
         } catch (e) {
             this.log(`Connection failed: ${e.message}`, 'error');
@@ -203,6 +206,26 @@ class JoypadConfigApp {
             this.log(`Profile set to ${result.name}`, 'success');
         } catch (e) {
             this.log(`Failed to set profile: ${e.message}`, 'error');
+        }
+    }
+
+    async loadWiimoteOrient() {
+        try {
+            const result = await this.protocol.getWiimoteOrient();
+            this.wiimoteOrientSelect.value = result.mode;
+            this.log(`Wiimote orientation: ${result.name}`);
+        } catch (e) {
+            this.log(`Failed to load Wiimote orientation: ${e.message}`, 'error');
+        }
+    }
+
+    async setWiimoteOrient(mode) {
+        try {
+            this.log(`Setting Wiimote orientation to ${mode}...`);
+            const result = await this.protocol.setWiimoteOrient(parseInt(mode));
+            this.log(`Wiimote orientation set to ${result.name}`, 'success');
+        } catch (e) {
+            this.log(`Failed to set Wiimote orientation: ${e.message}`, 'error');
         }
     }
 
