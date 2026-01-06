@@ -82,6 +82,19 @@ static void on_button_event(button_event_t event)
             break;
         }
 
+        case BUTTON_EVENT_TRIPLE_CLICK:
+            // Triple-click to reset to default HID mode
+            printf("[app:usb2usb] Triple-click - resetting to HID mode...\n");
+            if (usbd_get_mode() != USB_OUTPUT_MODE_HID) {
+                tud_task();
+                sleep_ms(50);
+                tud_task();
+                usbd_set_mode(USB_OUTPUT_MODE_HID);
+            } else {
+                printf("[app:usb2usb] Already in HID mode\n");
+            }
+            break;
+
         case BUTTON_EVENT_HOLD:
             // Long press to clear all Bluetooth bonds
             btstack_host_delete_all_bonds();

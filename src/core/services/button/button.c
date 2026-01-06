@@ -25,6 +25,7 @@ typedef enum {
     STATE_IDLE,             // Waiting for press
     STATE_PRESSED,          // Button is pressed, timing for click vs hold
     STATE_WAIT_DOUBLE,      // Released after click, waiting for possible second click
+    STATE_WAIT_TRIPLE,      // Released after double-click, waiting for possible third click
     STATE_HELD,             // Hold threshold reached, waiting for release
 } button_state_t;
 
@@ -35,7 +36,7 @@ static bool last_raw_state = false;     // Last debounced state
 static absolute_time_t last_change_time; // For debouncing
 static button_callback_t event_callback = NULL;
 static bool hold_event_fired = false;   // Track if hold event was already fired
-static bool double_click_fired = false; // Track if double-click was just fired
+static uint8_t click_count = 0;         // Track click count for multi-click detection
 
 // ============================================================================
 // INTERNAL HELPERS
@@ -151,7 +152,7 @@ void button_init(void)
     last_raw_state = false;
     last_change_time = get_absolute_time();
     hold_event_fired = false;
-    double_click_fired = false;
+    click_count = 0;
 
     printf("[button] Initialized\n");
 }
@@ -170,7 +171,7 @@ button_event_t button_task(void)
                 // Button just pressed
                 press_time = get_absolute_time();
                 hold_event_fired = false;
-                double_click_fired = false;
+                click_count = 0;
                 state = STATE_PRESSED;
             }
             break;
@@ -181,15 +182,24 @@ button_event_t button_task(void)
                 uint32_t held = elapsed_ms(press_time);
                 release_time = get_absolute_time();
 
-                if (double_click_fired) {
-                    // Just completed a double-click, go back to idle
-                    // (don't wait for another click)
-                    state = STATE_IDLE;
-                } else if (held < BUTTON_CLICK_MAX_MS) {
-                    // Short press - could be click or start of double-click
-                    state = STATE_WAIT_DOUBLE;
+                if (held < BUTTON_CLICK_MAX_MS) {
+                    // Short press - increment click count and wait for more
+                    click_count++;
+                    if (click_count >= 3) {
+                        // Third click completed - fire triple click
+                        event = fire_event(BUTTON_EVENT_TRIPLE_CLICK);
+                        click_count = 0;
+                        state = STATE_IDLE;
+                    } else if (click_count == 2) {
+                        // Second click completed - wait for possible third
+                        state = STATE_WAIT_TRIPLE;
+                    } else {
+                        // First click - wait for possible double
+                        state = STATE_WAIT_DOUBLE;
+                    }
                 } else {
                     // Was a hold, now released
+                    click_count = 0;
                     state = STATE_IDLE;
                     if (hold_event_fired) {
                         event = fire_event(BUTTON_EVENT_RELEASE);
@@ -200,6 +210,7 @@ button_event_t button_task(void)
                 uint32_t held = elapsed_ms(press_time);
                 if (held >= BUTTON_HOLD_MS && !hold_event_fired) {
                     hold_event_fired = true;
+                    click_count = 0;
                     state = STATE_HELD;
                     event = fire_event(BUTTON_EVENT_HOLD);
                 }
@@ -208,18 +219,35 @@ button_event_t button_task(void)
 
         case STATE_WAIT_DOUBLE:
             if (pressed) {
-                // Second press - it's a double click!
+                // Second press started
                 press_time = get_absolute_time();
                 hold_event_fired = false;
-                double_click_fired = true;  // Mark that double-click was fired
-                event = fire_event(BUTTON_EVENT_DOUBLE_CLICK);
-                state = STATE_PRESSED;  // Track this press too (could become hold)
+                state = STATE_PRESSED;
             } else {
                 // Still waiting for second press
                 uint32_t since_release = elapsed_ms(release_time);
                 if (since_release >= BUTTON_DOUBLE_CLICK_MS) {
                     // Timeout - it was a single click
                     event = fire_event(BUTTON_EVENT_CLICK);
+                    click_count = 0;
+                    state = STATE_IDLE;
+                }
+            }
+            break;
+
+        case STATE_WAIT_TRIPLE:
+            if (pressed) {
+                // Third press started
+                press_time = get_absolute_time();
+                hold_event_fired = false;
+                state = STATE_PRESSED;
+            } else {
+                // Still waiting for third press
+                uint32_t since_release = elapsed_ms(release_time);
+                if (since_release >= BUTTON_DOUBLE_CLICK_MS) {
+                    // Timeout - it was a double click
+                    event = fire_event(BUTTON_EVENT_DOUBLE_CLICK);
+                    click_count = 0;
                     state = STATE_IDLE;
                 }
             }
@@ -229,6 +257,7 @@ button_event_t button_task(void)
             if (!pressed) {
                 // Released after hold
                 event = fire_event(BUTTON_EVENT_RELEASE);
+                click_count = 0;
                 state = STATE_IDLE;
             }
             break;

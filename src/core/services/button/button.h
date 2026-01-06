@@ -16,6 +16,7 @@ typedef enum {
     BUTTON_EVENT_NONE = 0,
     BUTTON_EVENT_CLICK,         // Single short press
     BUTTON_EVENT_DOUBLE_CLICK,  // Two presses in quick succession
+    BUTTON_EVENT_TRIPLE_CLICK,  // Three presses in quick succession
     BUTTON_EVENT_HOLD,          // Long press (fires once when threshold reached)
     BUTTON_EVENT_RELEASE,       // Released after hold
 } button_event_t;
