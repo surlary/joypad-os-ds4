@@ -510,6 +510,10 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
   if (inst->cmd_index >= SWITCH2_INIT_CMD_COUNT) {
     printf("[SWITCH2] Initialization complete!\r\n");
     inst->state = SWITCH2_STATE_READY;
+    // Re-request HID reports in case they got stuck during bulk init
+    if (!tuh_hid_receive_report(dev_addr, instance)) {
+      printf("[SWITCH2] Warning: failed to re-request HID report\r\n");
+    }
     return;
   }
 

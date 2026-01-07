@@ -338,7 +338,7 @@ pico_generate_pio_header(joypad_pce ${CMAKE_CURRENT_LIST_DIR}/native/device/pcen
 
 # --- GameCube (KB2040) ---
 add_executable(joypad_ngc)
-target_compile_definitions(joypad_ngc PRIVATE CONFIG_NGC=1)
+target_compile_definitions(joypad_ngc PRIVATE CONFIG_NGC=1 CONFIG_USB_HOST=1)
 target_sources(joypad_ngc PUBLIC ${COMMON_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/gamecube/gamecube_device.c
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/joybus.c
@@ -360,7 +360,7 @@ pico_generate_pio_header(joypad_ngc ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src
 # Override default I2C pins (6/7) to avoid conflict with GameCube pins (GC_DATA=7, GC_3V3=6)
 add_executable(joypad_ngc_rp2040zero)
 target_compile_definitions(joypad_ngc_rp2040zero PRIVATE
-    CONFIG_NGC=1
+    CONFIG_NGC=1 CONFIG_USB_HOST=1
     WS2812_PIN=16
     USE_BOOTSEL_BUTTON=1
     PICO_DEFAULT_I2C_SDA_PIN=14
@@ -523,6 +523,7 @@ joypad_add_btstack(joypad_usb_rp2040zero)
 add_executable(joypad_usb_rp2350usba)
 target_compile_definitions(joypad_usb_rp2350usba PRIVATE
     CONFIG_USB=1
+    CONFIG_USB_HOST=1
     CONFIG_PIO_USB_DP_PIN=12
     PICO_DEFAULT_PIO_USB_DP_PIN=12
     BOARD_TUH_RHPORT=1
