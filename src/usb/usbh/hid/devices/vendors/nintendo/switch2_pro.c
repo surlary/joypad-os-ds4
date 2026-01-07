@@ -74,10 +74,12 @@ typedef struct {
   uint8_t ep_out;
   uint8_t itf_num;
   bool xfer_pending;
+  bool cmd_sent;            // True if current cmd_index has been sent
   uint8_t rumble_left;
   uint8_t rumble_right;
   uint8_t player_led;
   uint32_t last_haptic_ms;  // Timestamp of last haptic send
+  uint16_t pid;             // Product ID (to distinguish Pro vs GameCube)
   // Stick calibration (captured on first reports assuming sticks at rest)
   stick_cal_t cal_lx, cal_ly, cal_rx, cal_ry;
   uint8_t cal_samples;  // Number of samples collected for calibration
@@ -99,10 +101,10 @@ static uint8_t switch2_haptic_buf[64] CFG_TUH_MEM_ALIGN;
 // Haptic output packet counter (0x50-0x5F)
 static uint8_t haptic_counter = 0;
 
-// Check if device is Switch 2 Pro controller
+// Check if device is Switch 2 controller (Pro or GameCube)
 // TODO: Add bcdDevice check to distinguish from Switch 1 Pro
 static bool is_switch2_pro(uint16_t vid, uint16_t pid) {
-  return (vid == 0x057e && pid == SWITCH2_PRO_PID);
+  return (vid == 0x057e && (pid == SWITCH2_PRO_PID || pid == SWITCH2_GC_PID));
 }
 
 // Effective stick range from center (Switch sticks reach ~75-80% of theoretical max)
@@ -242,20 +244,32 @@ static bool find_bulk_endpoint(uint8_t dev_addr, uint8_t* ep_out, uint8_t* itf_n
   return false;
 }
 
-// Send command via bulk transfer
-static bool send_command(uint8_t dev_addr, uint8_t ep_out, const uint8_t* cmd, uint8_t len) {
-  if (!usbh_edpt_claim(dev_addr, ep_out)) {
-    return false;
-  }
+// Bulk transfer complete callback (for async transfers)
+static void bulk_xfer_complete_cb(tuh_xfer_t* xfer) {
+  // Mark transfer as complete - the task function checks xfer_pending
+  // We store dev_addr in user_data to find the instance
+  uint8_t dev_addr = (uint8_t)(xfer->user_data & 0xFF);
+  uint8_t instance = (uint8_t)((xfer->user_data >> 8) & 0xFF);
 
+  if (dev_addr < MAX_DEVICES && instance < CFG_TUH_HID) {
+    switch2_devices[dev_addr].instances[instance].xfer_pending = false;
+  }
+}
+
+// Send command via bulk transfer (async)
+static bool send_command(uint8_t dev_addr, uint8_t instance, uint8_t ep_out, const uint8_t* cmd, uint8_t len) {
   memcpy(switch2_cmd_buf, cmd, len);
 
-  if (!usbh_edpt_xfer(dev_addr, ep_out, switch2_cmd_buf, len)) {
-    usbh_edpt_release(dev_addr, ep_out);
-    return false;
-  }
+  tuh_xfer_t xfer = {
+    .daddr = dev_addr,
+    .ep_addr = ep_out,
+    .buffer = switch2_cmd_buf,
+    .buflen = len,
+    .complete_cb = bulk_xfer_complete_cb,
+    .user_data = dev_addr | (instance << 8)
+  };
 
-  return true;
+  return tuh_edpt_xfer(&xfer);
 }
 
 // Process input reports
@@ -264,8 +278,8 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
 
   uint8_t report_id = report[0];
 
-  // Only process Report ID 0x09
-  if (report_id != 0x09) {
+  // Process Report ID 0x09 (Pro Controller) or 0x0A (GameCube Controller)
+  if (report_id != 0x09 && report_id != 0x0A) {
     printf("[SWITCH2] Unknown report ID: 0x%02X\r\n", report_id);
     return;
   }
@@ -313,15 +327,27 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
   uint8_t ry = 255 - scale_analog_calibrated(right_y, inst->cal_ry.center);
 
   // Map buttons to JP_BUTTON format
+  // GameCube controller: swap L1<->L2 and R1<->R2 so the main triggers map to L2/R2
+  bool is_gc = (inst->pid == SWITCH2_GC_PID);
+
   uint32_t buttons = 0;
   if (rpt.b1) buttons |= JP_BUTTON_B1;  // B (bottom)
   if (rpt.b2) buttons |= JP_BUTTON_B2;  // A (right)
   if (rpt.b3) buttons |= JP_BUTTON_B3;  // Y (left)
   if (rpt.b4) buttons |= JP_BUTTON_B4;  // X (top)
-  if (rpt.l1) buttons |= JP_BUTTON_L1;  // L shoulder
-  if (rpt.r1) buttons |= JP_BUTTON_R1;  // R shoulder
-  if (rpt.l2) buttons |= JP_BUTTON_L2;  // ZL trigger
-  if (rpt.r2) buttons |= JP_BUTTON_R2;  // ZR trigger
+  if (is_gc) {
+    // GameCube: L/R triggers -> L2/R2, ZL/ZR -> L1/R1
+    if (rpt.l1) buttons |= JP_BUTTON_L2;  // L trigger -> L2
+    if (rpt.r1) buttons |= JP_BUTTON_R2;  // R trigger -> R2
+    if (rpt.l2) buttons |= JP_BUTTON_L1;  // ZL -> L1
+    if (rpt.r2) buttons |= JP_BUTTON_R1;  // ZR -> R1
+  } else {
+    // Pro Controller: standard mapping
+    if (rpt.l1) buttons |= JP_BUTTON_L1;  // L shoulder
+    if (rpt.r1) buttons |= JP_BUTTON_R1;  // R shoulder
+    if (rpt.l2) buttons |= JP_BUTTON_L2;  // ZL trigger
+    if (rpt.r2) buttons |= JP_BUTTON_R2;  // ZR trigger
+  }
   if (rpt.s1) buttons |= JP_BUTTON_S1;  // - (select)
   if (rpt.s2) buttons |= JP_BUTTON_S2;  // + (start)
   if (rpt.l3) buttons |= JP_BUTTON_L3;  // Left stick press
@@ -423,8 +449,8 @@ static void output_player_led(uint8_t dev_addr, uint8_t instance, uint8_t player
     return;
   }
 
-  // Check if endpoint is busy from previous transfer
-  if (usbh_edpt_busy(dev_addr, inst->ep_out)) {
+  // Check if a transfer is already pending
+  if (inst->xfer_pending) {
     // Try again next task cycle
     return;
   }
@@ -446,7 +472,10 @@ static void output_player_led(uint8_t dev_addr, uint8_t instance, uint8_t player
   memset(&led_cmd[9], 0, 7);
 
   // Send via bulk endpoint
-  bool sent = send_command(dev_addr, inst->ep_out, led_cmd, 16);
+  bool sent = send_command(dev_addr, instance, inst->ep_out, led_cmd, 16);
+  if (sent) {
+    inst->xfer_pending = true;
+  }
   printf("[SWITCH2] LED send: %s (ep=0x%02X)\r\n", sent ? "OK" : "FAIL", inst->ep_out);
 }
 
@@ -466,12 +495,14 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
     return;
   }
 
-  // Wait for previous transfer
+  // Wait for previous transfer (callback clears xfer_pending when done)
   if (inst->xfer_pending) {
-    if (usbh_edpt_busy(dev_addr, inst->ep_out)) {
-      return;
-    }
-    inst->xfer_pending = false;
+    return;
+  }
+
+  // If we sent the current command and transfer completed, advance
+  if (inst->cmd_sent) {
+    inst->cmd_sent = false;
     inst->cmd_index++;
   }
 
@@ -490,8 +521,9 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
 
   if (cmd && cmd_len > 0) {
     printf("[SWITCH2] Sending cmd %d/17: 0x%02X\r\n", inst->cmd_index + 1, cmd[0]);
-    if (send_command(dev_addr, inst->ep_out, cmd, cmd_len)) {
+    if (send_command(dev_addr, instance, inst->ep_out, cmd, cmd_len)) {
       inst->xfer_pending = true;
+      inst->cmd_sent = true;
     }
   } else {
     inst->cmd_index++;
@@ -500,10 +532,16 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
 
 // Initialize device
 static bool init_switch2_pro(uint8_t dev_addr, uint8_t instance) {
-  printf("[SWITCH2] Init dev=%d instance=%d\r\n", dev_addr, instance);
+  uint16_t vid, pid;
+  tuh_vid_pid_get(dev_addr, &vid, &pid);
+  const char* type_str = (pid == SWITCH2_GC_PID) ? "GameCube" : "Pro";
+  printf("[SWITCH2] Init %s dev=%d instance=%d (PID=0x%04X)\r\n", type_str, dev_addr, instance, pid);
 
   switch2_instance_t* inst = &switch2_devices[dev_addr].instances[instance];
   memset(inst, 0, sizeof(*inst));
+
+  // Store PID to identify controller type
+  inst->pid = pid;
 
   // Initialize to invalid values so first output triggers a send
   inst->rumble_left = 0xFF;

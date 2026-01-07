@@ -8,8 +8,9 @@
 #include "../../../hid_utils.h"
 #include "tusb.h"
 
-// Switch 2 Pro Controller PID
-#define SWITCH2_PRO_PID 0x2069
+// Switch 2 Controller PIDs
+#define SWITCH2_PRO_PID 0x2069  // Pro Controller
+#define SWITCH2_GC_PID  0x2073  // GameCube Controller
 
 // Switch 2 Pro initialization states
 typedef enum {
