@@ -253,19 +253,191 @@ static void cmd_mode_list(const char* json)
     send_json(response_buf);
 }
 
-static void cmd_profile_get(const char* json)
+// ============================================================================
+// UNIFIED PROFILE COMMANDS
+// ============================================================================
+//
+// Unified indexing:
+// - If app has built-in profiles (builtin_count > 0):
+//   Index 0 to builtin_count-1: Built-in profiles (builtin=true, editable=false)
+//   Index builtin_count to builtin_count+custom_count-1: Custom profiles (editable=true)
+//
+// - If app has no built-in profiles (builtin_count == 0):
+//   Index 0: Virtual "Default" passthrough (builtin=true, editable=false)
+//   Index 1 to custom_count: Custom profiles (editable=true)
+
+static uint8_t get_builtin_count(void)
+{
+    return profile_get_count(OUTPUT_TARGET_USB_DEVICE);
+}
+
+static uint8_t get_custom_count(void)
+{
+    flash_t* settings = flash_get_settings();
+    return settings ? settings->custom_profile_count : 0;
+}
+
+// Get total profile count (for unified indexing)
+static uint8_t get_total_count(void)
+{
+    uint8_t builtin = get_builtin_count();
+    uint8_t custom = get_custom_count();
+    // If no built-in profiles, we show a virtual "Default" at index 0
+    return (builtin > 0 ? builtin : 1) + custom;
+}
+
+// Convert unified index to custom profile index, returns -1 if not a custom profile
+static int unified_to_custom_index(int unified_idx)
+{
+    uint8_t builtin = get_builtin_count();
+    int custom_start = (builtin > 0) ? builtin : 1;
+    if (unified_idx >= custom_start) {
+        return unified_idx - custom_start;
+    }
+    return -1;  // Not a custom profile
+}
+
+// Convert custom profile index to unified index
+static int custom_to_unified_index(int custom_idx)
+{
+    uint8_t builtin = get_builtin_count();
+    int custom_start = (builtin > 0) ? builtin : 1;
+    return custom_start + custom_idx;
+}
+
+// Check if unified index is a built-in profile
+static bool is_builtin_profile(int unified_idx)
+{
+    uint8_t builtin = get_builtin_count();
+    if (builtin > 0) {
+        return unified_idx < builtin;
+    }
+    return unified_idx == 0;  // Virtual default
+}
+
+// PROFILE.LIST - Unified list of all profiles
+static void cmd_profile_list(const char* json)
 {
     (void)json;
-    uint8_t index = profile_get_active_index(OUTPUT_TARGET_USB_DEVICE);
-    uint8_t count = profile_get_count(OUTPUT_TARGET_USB_DEVICE);
-    const char* name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, index);
+    uint8_t builtin_count = get_builtin_count();
+    flash_t* settings = flash_get_settings();
+    uint8_t custom_count = settings ? settings->custom_profile_count : 0;
 
-    snprintf(response_buf, sizeof(response_buf),
-             "{\"index\":%d,\"name\":\"%s\",\"count\":%d}",
-             index, name ? name : "default", count);
+    // Determine active profile in unified indexing
+    int active;
+    if (builtin_count > 0) {
+        // Use built-in profile active index, or offset for custom
+        active = profile_get_active_index(OUTPUT_TARGET_USB_DEVICE);
+        // TODO: Handle custom profile selection for apps with built-in profiles
+    } else {
+        // No built-in profiles - use flash active index (already 0-based with virtual default)
+        active = settings ? settings->active_profile_index : 0;
+    }
+
+    int pos = snprintf(response_buf, sizeof(response_buf),
+                       "{\"ok\":true,\"active\":%d,\"profiles\":[", active);
+
+    int idx = 0;
+
+    // Add built-in profiles (or virtual Default)
+    if (builtin_count > 0) {
+        for (int i = 0; i < builtin_count && pos < (int)sizeof(response_buf) - 80; i++) {
+            const char* name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, i);
+            if (idx > 0) pos += snprintf(response_buf + pos, sizeof(response_buf) - pos, ",");
+            pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
+                            "{\"index\":%d,\"name\":\"%s\",\"builtin\":true,\"editable\":false}",
+                            idx, name ? name : "Default");
+            idx++;
+        }
+    } else {
+        // Virtual Default for apps without built-in profiles
+        pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
+                        "{\"index\":0,\"name\":\"Default\",\"builtin\":true,\"editable\":false}");
+        idx = 1;
+    }
+
+    // Add custom profiles
+    for (int i = 0; i < custom_count && i < CUSTOM_PROFILE_MAX_COUNT && pos < (int)sizeof(response_buf) - 80; i++) {
+        const custom_profile_t* p = &settings->profiles[i];
+        pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
+                        ",{\"index\":%d,\"name\":\"%.11s\",\"builtin\":false,\"editable\":true}",
+                        idx, p->name);
+        idx++;
+    }
+
+    snprintf(response_buf + pos, sizeof(response_buf) - pos, "]}");
     send_json(response_buf);
 }
 
+// PROFILE.GET - Get profile details
+static void cmd_profile_get(const char* json)
+{
+    int index;
+    if (!json_get_int(json, "index", &index)) {
+        // No index - return active profile info
+        uint8_t builtin_count = get_builtin_count();
+        int active;
+        if (builtin_count > 0) {
+            active = profile_get_active_index(OUTPUT_TARGET_USB_DEVICE);
+        } else {
+            flash_t* settings = flash_get_settings();
+            active = settings ? settings->active_profile_index : 0;
+        }
+        index = active;
+    }
+
+    uint8_t builtin_count = get_builtin_count();
+    flash_t* settings = flash_get_settings();
+    uint8_t custom_count = settings ? settings->custom_profile_count : 0;
+    uint8_t total = get_total_count();
+
+    if (index < 0 || index >= total) {
+        send_error("invalid index");
+        return;
+    }
+
+    bool builtin = is_builtin_profile(index);
+    int custom_idx = unified_to_custom_index(index);
+
+    if (builtin) {
+        // Built-in profile (or virtual Default)
+        const char* name;
+        if (builtin_count > 0) {
+            name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, index);
+        } else {
+            name = "Default";
+        }
+        // Built-in profiles don't expose button_map (it's compiled in)
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"ok\":true,\"index\":%d,\"name\":\"%s\",\"builtin\":true,\"editable\":false}",
+                 index, name ? name : "Default");
+    } else {
+        // Custom profile
+        if (custom_idx < 0 || custom_idx >= custom_count) {
+            send_error("invalid index");
+            return;
+        }
+        const custom_profile_t* p = &settings->profiles[custom_idx];
+
+        // Build button map array string
+        char map_str[100];
+        int mpos = 0;
+        for (int i = 0; i < CUSTOM_PROFILE_BUTTON_COUNT; i++) {
+            if (i > 0) mpos += snprintf(map_str + mpos, sizeof(map_str) - mpos, ",");
+            mpos += snprintf(map_str + mpos, sizeof(map_str) - mpos, "%d", p->button_map[i]);
+        }
+
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\",\"builtin\":false,\"editable\":true,"
+                 "\"button_map\":[%s],"
+                 "\"left_stick_sens\":%d,\"right_stick_sens\":%d,\"flags\":%d}",
+                 index, p->name, map_str,
+                 p->left_stick_sens, p->right_stick_sens, p->flags);
+    }
+    send_json(response_buf);
+}
+
+// PROFILE.SELECT - Select active profile (unified index)
 static void cmd_profile_set(const char* json)
 {
     int index;
@@ -274,37 +446,37 @@ static void cmd_profile_set(const char* json)
         return;
     }
 
-    uint8_t count = profile_get_count(OUTPUT_TARGET_USB_DEVICE);
-    if (index < 0 || index >= count) {
+    uint8_t total = get_total_count();
+    if (index < 0 || index >= total) {
         send_error("invalid index");
         return;
     }
 
-    profile_set_active(OUTPUT_TARGET_USB_DEVICE, index);
-    const char* name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, index);
+    uint8_t builtin_count = get_builtin_count();
 
-    snprintf(response_buf, sizeof(response_buf),
-             "{\"index\":%d,\"name\":\"%s\"}",
-             index, name ? name : "default");
-    send_json(response_buf);
-}
+    if (builtin_count > 0 && index < builtin_count) {
+        // Select built-in profile
+        profile_set_active(OUTPUT_TARGET_USB_DEVICE, index);
+        const char* name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, index);
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"ok\":true,\"index\":%d,\"name\":\"%s\"}",
+                 index, name ? name : "Default");
+    } else {
+        // Select custom profile (or default for apps without built-in)
+        int custom_idx = unified_to_custom_index(index);
+        // For flash, index 0 = default, 1+ = custom profiles
+        int flash_idx = (custom_idx < 0) ? 0 : custom_idx + 1;
+        flash_set_active_profile_index((uint8_t)flash_idx);
 
-static void cmd_profile_list(const char* json)
-{
-    (void)json;
-    uint8_t active = profile_get_active_index(OUTPUT_TARGET_USB_DEVICE);
-    uint8_t count = profile_get_count(OUTPUT_TARGET_USB_DEVICE);
-
-    int pos = snprintf(response_buf, sizeof(response_buf),
-                       "{\"active\":%d,\"profiles\":[", active);
-
-    for (int i = 0; i < count && pos < (int)sizeof(response_buf) - 50; i++) {
-        const char* name = profile_get_name(OUTPUT_TARGET_USB_DEVICE, i);
-        if (i > 0) pos += snprintf(response_buf + pos, sizeof(response_buf) - pos, ",");
-        pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
-                        "{\"id\":%d,\"name\":\"%s\"}", i, name ? name : "default");
+        flash_t* settings = flash_get_settings();
+        const char* name = "Default";
+        if (custom_idx >= 0 && settings && custom_idx < settings->custom_profile_count) {
+            name = settings->profiles[custom_idx].name;
+        }
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\"}",
+                 index, name);
     }
-    snprintf(response_buf + pos, sizeof(response_buf) - pos, "]}");
     send_json(response_buf);
 }
 
@@ -319,10 +491,6 @@ static void cmd_input_stream(const char* json)
     protocol_ctx.input_streaming = enable;
     send_ok();
 }
-
-// ============================================================================
-// CUSTOM PROFILE COMMANDS
-// ============================================================================
 
 // Parse JSON array of integers: [1,2,3,...]
 // Returns number of values parsed
@@ -359,41 +527,9 @@ static int json_get_int_array(const char* json, const char* key,
     return count;
 }
 
-// CPROFILE.LIST - List custom profiles
-static void cmd_cprofile_list(const char* json)
-{
-    (void)json;
-
-    // Use runtime settings for consistency
-    flash_t* settings = flash_get_settings();
-    if (!settings) {
-        // No runtime settings - return empty list with just default
-        snprintf(response_buf, sizeof(response_buf),
-                 "{\"ok\":true,\"active\":0,\"profiles\":[{\"index\":0,\"name\":\"Default\",\"builtin\":true}]}");
-        send_json(response_buf);
-        return;
-    }
-
-    int pos = snprintf(response_buf, sizeof(response_buf),
-                       "{\"ok\":true,\"active\":%d,\"profiles\":[{\"index\":0,\"name\":\"Default\",\"builtin\":true}",
-                       settings->active_profile_index);
-
-    // Add custom profiles
-    for (int i = 0; i < settings->custom_profile_count && i < CUSTOM_PROFILE_MAX_COUNT; i++) {
-        const custom_profile_t* p = &settings->profiles[i];
-        if (pos < (int)sizeof(response_buf) - 60) {
-            pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
-                            ",{\"index\":%d,\"name\":\"%.11s\",\"builtin\":false}",
-                            i + 1, p->name);
-        }
-    }
-
-    snprintf(response_buf + pos, sizeof(response_buf) - pos, "]}");
-    send_json(response_buf);
-}
-
-// CPROFILE.GET - Get custom profile details
-static void cmd_cprofile_get(const char* json)
+// PROFILE.SAVE - Create or update custom profile (unified index)
+// index=255 creates a new profile
+static void cmd_profile_save(const char* json)
 {
     int index;
     if (!json_get_int(json, "index", &index)) {
@@ -401,61 +537,9 @@ static void cmd_cprofile_get(const char* json)
         return;
     }
 
-    // Index 0 = default (passthrough)
-    if (index == 0) {
-        snprintf(response_buf, sizeof(response_buf),
-                 "{\"ok\":true,\"index\":0,\"name\":\"Default\",\"builtin\":true,"
-                 "\"button_map\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"
-                 "\"left_stick_sens\":100,\"right_stick_sens\":100,\"flags\":0}");
-        send_json(response_buf);
-        return;
-    }
-
-    // Use runtime settings for consistency
-    flash_t* settings = flash_get_settings();
-    if (!settings) {
-        send_error("flash not initialized");
-        return;
-    }
-
-    // Custom profiles are 1-indexed to user (0 = default)
-    int profile_idx = index - 1;
-    if (profile_idx < 0 || profile_idx >= settings->custom_profile_count) {
-        send_error("invalid index");
-        return;
-    }
-
-    const custom_profile_t* p = &settings->profiles[profile_idx];
-
-    // Build button map array string
-    char map_str[100];
-    int mpos = 0;
-    for (int i = 0; i < CUSTOM_PROFILE_BUTTON_COUNT; i++) {
-        if (i > 0) mpos += snprintf(map_str + mpos, sizeof(map_str) - mpos, ",");
-        mpos += snprintf(map_str + mpos, sizeof(map_str) - mpos, "%d", p->button_map[i]);
-    }
-
-    snprintf(response_buf, sizeof(response_buf),
-             "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\",\"builtin\":false,"
-             "\"button_map\":[%s],"
-             "\"left_stick_sens\":%d,\"right_stick_sens\":%d,\"flags\":%d}",
-             index, p->name, map_str,
-             p->left_stick_sens, p->right_stick_sens, p->flags);
-    send_json(response_buf);
-}
-
-// CPROFILE.SET - Create or update custom profile
-static void cmd_cprofile_set(const char* json)
-{
-    int index;
-    if (!json_get_int(json, "index", &index)) {
-        send_error("missing index");
-        return;
-    }
-
-    // Can't modify default profile
-    if (index == 0) {
-        send_error("cannot modify default profile");
+    // Can't modify built-in profiles
+    if (index != 255 && is_builtin_profile(index)) {
+        send_error("cannot modify built-in profile");
         return;
     }
 
@@ -467,24 +551,26 @@ static void cmd_cprofile_set(const char* json)
     }
 
     // Index 255 = create new
-    int profile_idx;
+    int custom_idx;
+    bool is_new = false;
     if (index == 255) {
         if (settings->custom_profile_count >= CUSTOM_PROFILE_MAX_COUNT) {
             send_error("max profiles reached");
             return;
         }
-        profile_idx = settings->custom_profile_count;
+        custom_idx = settings->custom_profile_count;
         settings->custom_profile_count++;
-        index = profile_idx + 1;  // User-facing index
+        index = custom_to_unified_index(custom_idx);
+        is_new = true;
     } else {
-        profile_idx = index - 1;
-        if (profile_idx < 0 || profile_idx >= settings->custom_profile_count) {
+        custom_idx = unified_to_custom_index(index);
+        if (custom_idx < 0 || custom_idx >= settings->custom_profile_count) {
             send_error("invalid index");
             return;
         }
     }
 
-    custom_profile_t* p = &settings->profiles[profile_idx];
+    custom_profile_t* p = &settings->profiles[custom_idx];
 
     // Get name
     int name_len;
@@ -493,9 +579,9 @@ static void cmd_cprofile_set(const char* json)
         int copy_len = name_len < CUSTOM_PROFILE_NAME_LEN - 1 ? name_len : CUSTOM_PROFILE_NAME_LEN - 1;
         memcpy(p->name, name, copy_len);
         p->name[copy_len] = '\0';
-    } else if (profile_idx == settings->custom_profile_count - 1) {
+    } else if (is_new) {
         // New profile without name
-        snprintf(p->name, CUSTOM_PROFILE_NAME_LEN, "Profile %d", index);
+        snprintf(p->name, CUSTOM_PROFILE_NAME_LEN, "Custom %d", custom_idx + 1);
     }
 
     // Get button map
@@ -503,7 +589,7 @@ static void cmd_cprofile_set(const char* json)
     int map_count = json_get_int_array(json, "button_map", button_map, CUSTOM_PROFILE_BUTTON_COUNT);
     if (map_count == CUSTOM_PROFILE_BUTTON_COUNT) {
         memcpy(p->button_map, button_map, CUSTOM_PROFILE_BUTTON_COUNT);
-    } else if (map_count == 0 && profile_idx == settings->custom_profile_count - 1) {
+    } else if (map_count == 0 && is_new) {
         // New profile - initialize to passthrough
         memset(p->button_map, BUTTON_MAP_PASSTHROUGH, CUSTOM_PROFILE_BUTTON_COUNT);
     }
@@ -512,13 +598,13 @@ static void cmd_cprofile_set(const char* json)
     int sens;
     if (json_get_int(json, "left_stick_sens", &sens)) {
         p->left_stick_sens = (uint8_t)(sens > 200 ? 200 : (sens < 0 ? 0 : sens));
-    } else if (profile_idx == settings->custom_profile_count - 1) {
+    } else if (is_new) {
         p->left_stick_sens = 100;
     }
 
     if (json_get_int(json, "right_stick_sens", &sens)) {
         p->right_stick_sens = (uint8_t)(sens > 200 ? 200 : (sens < 0 ? 0 : sens));
-    } else if (profile_idx == settings->custom_profile_count - 1) {
+    } else if (is_new) {
         p->right_stick_sens = 100;
     }
 
@@ -536,8 +622,8 @@ static void cmd_cprofile_set(const char* json)
     send_json(response_buf);
 }
 
-// CPROFILE.DELETE - Delete custom profile
-static void cmd_cprofile_delete(const char* json)
+// PROFILE.DELETE - Delete custom profile (unified index)
+static void cmd_profile_delete(const char* json)
 {
     int index;
     if (!json_get_int(json, "index", &index)) {
@@ -545,8 +631,9 @@ static void cmd_cprofile_delete(const char* json)
         return;
     }
 
-    if (index == 0) {
-        send_error("cannot delete default profile");
+    // Can't delete built-in profiles
+    if (is_builtin_profile(index)) {
+        send_error("cannot delete built-in profile");
         return;
     }
 
@@ -557,14 +644,14 @@ static void cmd_cprofile_delete(const char* json)
         return;
     }
 
-    int profile_idx = index - 1;
-    if (profile_idx < 0 || profile_idx >= settings->custom_profile_count) {
+    int custom_idx = unified_to_custom_index(index);
+    if (custom_idx < 0 || custom_idx >= settings->custom_profile_count) {
         send_error("invalid index");
         return;
     }
 
     // Shift remaining profiles down
-    for (int i = profile_idx; i < settings->custom_profile_count - 1; i++) {
+    for (int i = custom_idx; i < settings->custom_profile_count - 1; i++) {
         memcpy(&settings->profiles[i], &settings->profiles[i + 1], sizeof(custom_profile_t));
     }
     settings->custom_profile_count--;
@@ -572,10 +659,11 @@ static void cmd_cprofile_delete(const char* json)
     // Clear the last slot
     memset(&settings->profiles[settings->custom_profile_count], 0, sizeof(custom_profile_t));
 
-    // Adjust active profile if needed
-    if (settings->active_profile_index > index) {
+    // Adjust active profile if needed (using flash index: 0=default, 1+=custom)
+    uint8_t flash_idx = custom_idx + 1;  // Convert custom_idx to flash index
+    if (settings->active_profile_index > flash_idx) {
         settings->active_profile_index--;
-    } else if (settings->active_profile_index == index) {
+    } else if (settings->active_profile_index == flash_idx) {
         settings->active_profile_index = 0;  // Switch to default
     }
 
@@ -584,39 +672,120 @@ static void cmd_cprofile_delete(const char* json)
     send_ok();
 }
 
-// CPROFILE.SELECT - Select active custom profile
-static void cmd_cprofile_select(const char* json)
+// PROFILE.CLONE - Clone any profile (built-in or custom) to new custom profile
+static void cmd_profile_clone(const char* json)
 {
-    int index;
-    if (!json_get_int(json, "index", &index)) {
+    int source_index;
+    if (!json_get_int(json, "index", &source_index)) {
         send_error("missing index");
         return;
     }
 
-    // Use runtime API for profile selection (keeps runtime state in sync)
+    uint8_t total = get_total_count();
+    if (source_index < 0 || source_index >= total) {
+        send_error("invalid source index");
+        return;
+    }
+
     flash_t* settings = flash_get_settings();
     if (!settings) {
         send_error("flash not initialized");
         return;
     }
 
-    // Validate index (0 = default, 1-N = custom)
-    if (index < 0 || index > settings->custom_profile_count) {
-        send_error("invalid index");
+    if (settings->custom_profile_count >= CUSTOM_PROFILE_MAX_COUNT) {
+        send_error("max profiles reached");
         return;
     }
 
-    // Use the runtime API which updates runtime_settings and saves to flash
-    flash_set_active_profile_index((uint8_t)index);
+    // Create new custom profile
+    int new_custom_idx = settings->custom_profile_count;
+    settings->custom_profile_count++;
+    custom_profile_t* new_profile = &settings->profiles[new_custom_idx];
 
-    const char* name = "Default";
-    if (index > 0 && index <= settings->custom_profile_count) {
-        name = settings->profiles[index - 1].name;
+    // Generate name for the new profile
+    char new_name[CUSTOM_PROFILE_NAME_LEN];
+    int name_len;
+    const char* json_name = json_get_string(json, "name", &name_len);
+    if (json_name && name_len > 0) {
+        int copy_len = name_len < CUSTOM_PROFILE_NAME_LEN - 1 ? name_len : CUSTOM_PROFILE_NAME_LEN - 1;
+        memcpy(new_name, json_name, copy_len);
+        new_name[copy_len] = '\0';
+    } else {
+        // Generate name based on source
+        if (is_builtin_profile(source_index)) {
+            const char* src_name = (get_builtin_count() > 0) ?
+                profile_get_name(OUTPUT_TARGET_USB_DEVICE, source_index) : "Default";
+            snprintf(new_name, CUSTOM_PROFILE_NAME_LEN, "%.7s Copy", src_name ? src_name : "Default");
+        } else {
+            int src_custom_idx = unified_to_custom_index(source_index);
+            if (src_custom_idx >= 0 && src_custom_idx < settings->custom_profile_count - 1) {
+                snprintf(new_name, CUSTOM_PROFILE_NAME_LEN, "%.7s Copy",
+                         settings->profiles[src_custom_idx].name);
+            } else {
+                snprintf(new_name, CUSTOM_PROFILE_NAME_LEN, "Custom %d", new_custom_idx + 1);
+            }
+        }
     }
 
+    // Initialize the new profile with the generated name
+    custom_profile_init(new_profile, new_name);
+
+    // Copy settings from source if it's a custom profile
+    if (!is_builtin_profile(source_index)) {
+        int src_custom_idx = unified_to_custom_index(source_index);
+        if (src_custom_idx >= 0 && src_custom_idx < settings->custom_profile_count - 1) {
+            const custom_profile_t* src = &settings->profiles[src_custom_idx];
+            memcpy(new_profile->button_map, src->button_map, CUSTOM_PROFILE_BUTTON_COUNT);
+            new_profile->left_stick_sens = src->left_stick_sens;
+            new_profile->right_stick_sens = src->right_stick_sens;
+            new_profile->flags = src->flags;
+        }
+    }
+    // For built-in profiles, keep passthrough settings (already initialized)
+
+    // Save to flash
+    flash_save(settings);
+
+    int new_unified_idx = custom_to_unified_index(new_custom_idx);
     snprintf(response_buf, sizeof(response_buf),
-             "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\"}", index, name);
+             "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\"}", new_unified_idx, new_profile->name);
     send_json(response_buf);
+}
+
+// Legacy alias for CPROFILE.SELECT (deprecated, use PROFILE.SET)
+static void cmd_cprofile_select(const char* json)
+{
+    // Redirect to unified PROFILE.SET
+    cmd_profile_set(json);
+}
+
+// Legacy alias for CPROFILE.LIST (deprecated, use PROFILE.LIST)
+static void cmd_cprofile_list(const char* json)
+{
+    // Redirect to unified PROFILE.LIST
+    cmd_profile_list(json);
+}
+
+// Legacy alias for CPROFILE.GET (deprecated, use PROFILE.GET)
+static void cmd_cprofile_get(const char* json)
+{
+    // Redirect to unified PROFILE.GET
+    cmd_profile_get(json);
+}
+
+// Legacy alias for CPROFILE.SET (deprecated, use PROFILE.SAVE)
+static void cmd_cprofile_set(const char* json)
+{
+    // Redirect to unified PROFILE.SAVE
+    cmd_profile_save(json);
+}
+
+// Legacy alias for CPROFILE.DELETE (deprecated, use PROFILE.DELETE)
+static void cmd_cprofile_delete(const char* json)
+{
+    // Redirect to unified PROFILE.DELETE
+    cmd_profile_delete(json);
 }
 
 static void cmd_settings_get(const char* json)
@@ -730,9 +899,14 @@ static const cmd_entry_t commands[] = {
     {"MODE.GET", cmd_mode_get},
     {"MODE.SET", cmd_mode_set},
     {"MODE.LIST", cmd_mode_list},
+    // Unified profile commands
+    {"PROFILE.LIST", cmd_profile_list},
     {"PROFILE.GET", cmd_profile_get},
     {"PROFILE.SET", cmd_profile_set},
-    {"PROFILE.LIST", cmd_profile_list},
+    {"PROFILE.SAVE", cmd_profile_save},
+    {"PROFILE.DELETE", cmd_profile_delete},
+    {"PROFILE.CLONE", cmd_profile_clone},
+    // Legacy CPROFILE.* aliases (deprecated - redirect to unified commands)
     {"CPROFILE.LIST", cmd_cprofile_list},
     {"CPROFILE.GET", cmd_cprofile_get},
     {"CPROFILE.SET", cmd_cprofile_set},
