@@ -3,15 +3,20 @@
  */
 
 // Button names matching JP_BUTTON_* order (W3C Gamepad API)
+// First 18 buttons are remappable in custom profiles
 const BUTTON_NAMES = [
-    'B1', 'B2', 'B3', 'B4',     // Face buttons
-    'L1', 'R1', 'L2', 'R2',     // Shoulders
-    'S1', 'S2',                 // Select/Start
-    'L3', 'R3',                 // Stick clicks
-    'DU', 'DD', 'DL', 'DR',     // D-pad
-    'A1', 'A2', 'A3', 'A4',     // Auxiliary (Home, Capture, Mute, etc)
-    'L4', 'R4'                  // Paddles
+    'B1', 'B2', 'B3', 'B4',     // Face buttons (0-3)
+    'L1', 'R1', 'L2', 'R2',     // Shoulders (4-7)
+    'S1', 'S2',                 // Select/Start (8-9)
+    'L3', 'R3',                 // Stick clicks (10-11)
+    'DU', 'DD', 'DL', 'DR',     // D-pad (12-15)
+    'A1', 'A2',                 // Auxiliary (16-17) - last remappable buttons
+    'A3', 'A4',                 // Extended aux (18-19) - not remappable
+    'L4', 'R4'                  // Paddles (20-21) - not remappable
 ];
+
+// Number of buttons that support remapping in custom profiles
+const REMAPPABLE_BUTTON_COUNT = 18;
 
 // Friendly button names for UI
 const BUTTON_LABELS = {
@@ -126,9 +131,10 @@ class JoypadConfigApp {
     }
 
     initButtonMapUI() {
-        // Create button mapping dropdowns
+        // Create button mapping dropdowns (only for remappable buttons)
         this.buttonMapContainer.innerHTML = '';
-        for (let i = 0; i < BUTTON_NAMES.length; i++) {
+        const remappableButtons = BUTTON_NAMES.slice(0, REMAPPABLE_BUTTON_COUNT);
+        for (let i = 0; i < REMAPPABLE_BUTTON_COUNT; i++) {
             const row = document.createElement('div');
             row.className = 'button-map-row';
 
@@ -141,7 +147,7 @@ class JoypadConfigApp {
             select.id = `buttonMap${i}`;
             select.innerHTML = `
                 <option value="0">Passthrough</option>
-                ${BUTTON_NAMES.map((name, idx) =>
+                ${remappableButtons.map((name, idx) =>
                     `<option value="${idx + 1}">${name} (${BUTTON_LABELS[name]})</option>`
                 ).join('')}
                 <option value="255">Disabled</option>
@@ -528,7 +534,7 @@ class JoypadConfigApp {
         if (isNew) {
             // Reset to defaults
             this.profileNameInput.value = '';
-            for (let i = 0; i < BUTTON_NAMES.length; i++) {
+            for (let i = 0; i < REMAPPABLE_BUTTON_COUNT; i++) {
                 document.getElementById(`buttonMap${i}`).value = '0';
             }
             this.leftStickSens.value = 100;
@@ -546,7 +552,7 @@ class JoypadConfigApp {
 
                 // Set button map
                 const buttonMap = profile.button_map || [];
-                for (let i = 0; i < BUTTON_NAMES.length; i++) {
+                for (let i = 0; i < REMAPPABLE_BUTTON_COUNT; i++) {
                     const value = buttonMap[i] !== undefined ? buttonMap[i] : 0;
                     document.getElementById(`buttonMap${i}`).value = value;
                 }
@@ -583,9 +589,9 @@ class JoypadConfigApp {
             return;
         }
 
-        // Collect button map
+        // Collect button map (only remappable buttons)
         const buttonMap = [];
-        for (let i = 0; i < BUTTON_NAMES.length; i++) {
+        for (let i = 0; i < REMAPPABLE_BUTTON_COUNT; i++) {
             buttonMap.push(parseInt(document.getElementById(`buttonMap${i}`).value));
         }
 
