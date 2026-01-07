@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 // HID Report Descriptor for Generic Gamepad (GP2040-CE compatible, PS3 support)
-// 18 buttons, 4 axes (2 sticks), 1 dpad (hat switch), 12 pressure axes (PS3)
+// 18 buttons, 6 axes (2 sticks + 2 triggers), 1 dpad (hat switch), 12 pressure axes (PS3)
 static const uint8_t hid_report_descriptor[] = {
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x05,        // Usage (Game Pad)
@@ -40,15 +40,17 @@ static const uint8_t hid_report_descriptor[] = {
     0x95, 0x01,        //   Report Count (1)
     0x81, 0x01,        //   Input (Const,Ary,Abs) - 4 bit padding
 
-    // Analog sticks (4 axes: X, Y, Z, Rz)
+    // Analog axes (6 axes: X, Y, Z, Rz for sticks, Rx, Ry for triggers)
     0x26, 0xFF, 0x00,  //   Logical Maximum (255)
     0x46, 0xFF, 0x00,  //   Physical Maximum (255)
     0x09, 0x30,        //   Usage (X)  - Left Stick X
     0x09, 0x31,        //   Usage (Y)  - Left Stick Y
     0x09, 0x32,        //   Usage (Z)  - Right Stick X
     0x09, 0x35,        //   Usage (Rz) - Right Stick Y
+    0x09, 0x33,        //   Usage (Rx) - Left Trigger (L2)
+    0x09, 0x34,        //   Usage (Ry) - Right Trigger (R2)
     0x75, 0x08,        //   Report Size (8)
-    0x95, 0x04,        //   Report Count (4)
+    0x95, 0x06,        //   Report Count (6)
     0x81, 0x02,        //   Input (Data,Var,Abs)
 
     // PS3 pressure axes (Vendor Specific) - 12 bytes
@@ -74,7 +76,7 @@ static const uint8_t hid_report_descriptor[] = {
 };
 
 // HID Report structure (matches descriptor above)
-// 20 bytes total: buttons + hat + sticks + PS3 pressure
+// 22 bytes total: buttons + hat + sticks + triggers + PS3 pressure
 typedef struct __attribute__((packed)) {
     uint8_t  buttons_lo;    // Buttons 1-8: B3,B1,B2,B4,L1,R1,L2,R2
     uint8_t  buttons_mid;   // Buttons 9-16: S1,S2,L3,R3,A1,A2,A3,A4
@@ -84,6 +86,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  ly;            // Left stick Y (0-255, 128 = center)
     uint8_t  rx;            // Right stick X (0-255, 128 = center)
     uint8_t  ry;            // Right stick Y (0-255, 128 = center)
+    uint8_t  lt;            // Left trigger (0-255, 0 = released)
+    uint8_t  rt;            // Right trigger (0-255, 0 = released)
     // PS3 pressure axes (vendor specific)
     uint8_t  pressure_dpad_right;
     uint8_t  pressure_dpad_left;

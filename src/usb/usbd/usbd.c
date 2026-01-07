@@ -760,6 +760,10 @@ static bool usbd_send_hid_report(uint8_t player_index)
     hid_report.rx = profile_out.right_x;
     hid_report.ry = profile_out.right_y;
 
+    // Analog triggers (standard HID axes for DInput compatibility)
+    hid_report.lt = profile_out.l2_analog;
+    hid_report.rt = profile_out.r2_analog;
+
     // PS3 pressure axes (0x00 = released, 0xFF = fully pressed)
     hid_report.pressure_dpad_right = (processed_buttons & JP_BUTTON_DR) ? 0xFF : 0x00;
     hid_report.pressure_dpad_left  = (processed_buttons & JP_BUTTON_DL) ? 0xFF : 0x00;
