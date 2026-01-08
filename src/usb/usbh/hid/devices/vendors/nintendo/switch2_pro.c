@@ -67,6 +67,13 @@ typedef struct {
   bool calibrated;      // Whether this axis has been calibrated
 } stick_cal_t;
 
+// Trigger calibration data (tracks min/max for scaling)
+typedef struct {
+  uint8_t min;          // Minimum value seen (released position)
+  uint8_t max;          // Maximum value seen (fully pressed)
+  bool calibrated;      // Whether we've seen enough range
+} trigger_cal_t;
+
 // Instance state
 typedef struct {
   switch2_init_state_t state;
@@ -85,6 +92,8 @@ typedef struct {
   // Stick calibration (captured on first reports assuming sticks at rest)
   stick_cal_t cal_lx, cal_ly, cal_rx, cal_ry;
   uint8_t cal_samples;  // Number of samples collected for calibration
+  // Trigger calibration (GameCube only)
+  trigger_cal_t cal_lt, cal_rt;
 } switch2_instance_t;
 
 // Device state
@@ -364,6 +373,40 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
   uint8_t rx = scale_analog_calibrated(right_x, inst->cal_rx.center, right_range);
   uint8_t ry = 255 - scale_analog_calibrated(right_y, inst->cal_ry.center, right_range);
 
+  // Parse analog triggers (GameCube only, at offset 13-14 right after sticks)
+  uint8_t lt = 0;
+  uint8_t rt = 0;
+  if (is_gc && len >= 15) {
+    uint8_t raw_lt = report[13];
+    uint8_t raw_rt = report[14];
+
+    // Update trigger calibration (track min/max)
+    if (raw_lt < inst->cal_lt.min) inst->cal_lt.min = raw_lt;
+    if (raw_lt > inst->cal_lt.max) inst->cal_lt.max = raw_lt;
+    if (raw_rt < inst->cal_rt.min) inst->cal_rt.min = raw_rt;
+    if (raw_rt > inst->cal_rt.max) inst->cal_rt.max = raw_rt;
+
+    // Scale triggers to 0-255 based on observed min/max
+    // Use reasonable defaults if range is too small
+    uint8_t lt_min = inst->cal_lt.min;
+    uint8_t lt_max = inst->cal_lt.max;
+    uint8_t rt_min = inst->cal_rt.min;
+    uint8_t rt_max = inst->cal_rt.max;
+
+    // Ensure minimum range to avoid division issues
+    if (lt_max - lt_min < 20) { lt_min = 20; lt_max = 240; }
+    if (rt_max - rt_min < 20) { rt_min = 20; rt_max = 240; }
+
+    // Scale to 0-255
+    if (raw_lt <= lt_min) lt = 0;
+    else if (raw_lt >= lt_max) lt = 255;
+    else lt = (uint8_t)(((uint16_t)(raw_lt - lt_min) * 255) / (lt_max - lt_min));
+
+    if (raw_rt <= rt_min) rt = 0;
+    else if (raw_rt >= rt_max) rt = 255;
+    else rt = (uint8_t)(((uint16_t)(raw_rt - rt_min) * 255) / (rt_max - rt_min));
+  }
+
   uint32_t buttons = 0;
   if (rpt.b1) buttons |= JP_BUTTON_B1;  // B (bottom)
   if (rpt.b2) buttons |= JP_BUTTON_B2;  // A (right)
@@ -403,7 +446,7 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
     .transport = INPUT_TRANSPORT_USB,
     .buttons = buttons,
     .button_count = 10,
-    .analog = {lx, ly, rx, ry, 0, 0},
+    .analog = {lx, ly, rx, ry, lt, rt},
     .keys = 0,
   };
   router_submit_input(&event);
@@ -689,6 +732,12 @@ static bool init_switch2_pro(uint8_t dev_addr, uint8_t instance) {
   inst->rumble_left = 0xFF;
   inst->rumble_right = 0xFF;
   inst->player_led = 0xFF;
+
+  // Initialize trigger calibration (min starts high, max starts low)
+  inst->cal_lt.min = 255;
+  inst->cal_lt.max = 0;
+  inst->cal_rt.min = 255;
+  inst->cal_rt.max = 0;
 
   switch2_devices[dev_addr].instance_count++;
 
