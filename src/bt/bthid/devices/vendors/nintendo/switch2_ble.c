@@ -60,6 +60,12 @@
 #define SW2_GC_CSTICK_RANGE 1120    // GameCube C-stick range
 
 // ============================================================================
+// CALIBRATION CONSTANTS
+// ============================================================================
+
+#define CAL_SAMPLES_NEEDED 4  // Number of samples to average for calibration
+
+// ============================================================================
 // DRIVER DATA
 // ============================================================================
 
@@ -67,6 +73,10 @@ typedef struct {
     input_event_t event;
     bool initialized;
     uint16_t pid;
+    // Stick calibration (captured on first reports assuming sticks at rest)
+    uint16_t cal_lx_center, cal_ly_center;
+    uint16_t cal_rx_center, cal_ry_center;
+    uint8_t cal_samples;  // Number of samples collected for calibration
 } switch2_ble_data_t;
 
 static switch2_ble_data_t switch2_data[BTHID_MAX_DEVICES];
@@ -75,11 +85,23 @@ static switch2_ble_data_t switch2_data[BTHID_MAX_DEVICES];
 // HELPER FUNCTIONS
 // ============================================================================
 
-// Convert 12-bit axis value (0-4095, neutral 2048) to 8-bit (0-255, neutral 128)
-static inline uint8_t axis_12bit_to_8bit(uint16_t value) {
-    // Clamp and scale from 0-4095 to 0-255
-    if (value > 4095) value = 4095;
-    return (uint8_t)(value >> 4);
+// Scale calibrated analog value to 8-bit (0-255, 128 = center)
+// val: raw 12-bit value (0-4095)
+// center: calibrated center value
+// range: effective stick range from center to max deflection
+// Returns: 0-255 with 128 as center
+static uint8_t scale_analog_calibrated(uint16_t val, uint16_t center, uint16_t range) {
+    int32_t centered = (int32_t)val - (int32_t)center;
+
+    // Scale to -128..+127 range using effective stick range
+    int32_t scaled = (centered * 127) / range;
+
+    // Clamp to valid range
+    if (scaled < -128) scaled = -128;
+    if (scaled > 127) scaled = 127;
+
+    // Convert to 0-255 with 128 as center
+    return (uint8_t)(scaled + 128);
 }
 
 // ============================================================================
@@ -224,15 +246,42 @@ static void switch2_ble_process_report(bthid_device_t* device, const uint8_t* da
     uint16_t raw_rx = report[13] | ((report[14] & 0x0F) << 8);
     uint16_t raw_ry = (report[14] >> 4) | (report[15] << 4);
 
-    // Convert 12-bit to 8-bit
-    uint8_t lx = axis_12bit_to_8bit(raw_lx);
-    uint8_t ly = axis_12bit_to_8bit(raw_ly);
-    uint8_t rx = axis_12bit_to_8bit(raw_rx);
-    uint8_t ry = axis_12bit_to_8bit(raw_ry);
+    // Auto-calibrate center on first reports (assumes sticks at rest during connect)
+    if (sw2->cal_samples < CAL_SAMPLES_NEEDED) {
+        if (sw2->cal_samples == 0) {
+            sw2->cal_lx_center = raw_lx;
+            sw2->cal_ly_center = raw_ly;
+            sw2->cal_rx_center = raw_rx;
+            sw2->cal_ry_center = raw_ry;
+        } else {
+            // Simple averaging
+            sw2->cal_lx_center = (sw2->cal_lx_center + raw_lx) / 2;
+            sw2->cal_ly_center = (sw2->cal_ly_center + raw_ly) / 2;
+            sw2->cal_rx_center = (sw2->cal_rx_center + raw_rx) / 2;
+            sw2->cal_ry_center = (sw2->cal_ry_center + raw_ry) / 2;
+        }
+        sw2->cal_samples++;
 
-    // Invert Y axes (Switch uses up=high, we use up=low)
-    ly = 255 - ly;
-    ry = 255 - ry;
+        if (sw2->cal_samples >= CAL_SAMPLES_NEEDED) {
+            printf("[SW2_BLE] Calibrated centers: L(%u,%u) R(%u,%u)\n",
+                   sw2->cal_lx_center, sw2->cal_ly_center,
+                   sw2->cal_rx_center, sw2->cal_ry_center);
+        }
+        return;  // Skip input during calibration
+    }
+
+    // Scale analog sticks using calibrated centers
+    // Use appropriate range for controller type (GameCube has smaller physical range)
+    // GameCube C-stick (right) has even smaller range than main stick (left)
+    bool is_gc = (sw2->pid == SW2_GC_PID);
+    uint16_t left_range = is_gc ? SW2_GC_AXIS_RANGE : SW2_PRO_AXIS_RANGE;
+    uint16_t right_range = is_gc ? SW2_GC_CSTICK_RANGE : SW2_PRO_AXIS_RANGE;
+
+    // Invert Y: Nintendo uses up=high, HID uses up=low
+    uint8_t lx = scale_analog_calibrated(raw_lx, sw2->cal_lx_center, left_range);
+    uint8_t ly = 255 - scale_analog_calibrated(raw_ly, sw2->cal_ly_center, left_range);
+    uint8_t rx = scale_analog_calibrated(raw_rx, sw2->cal_rx_center, right_range);
+    uint8_t ry = 255 - scale_analog_calibrated(raw_ry, sw2->cal_ry_center, right_range);
 
     // Parse triggers (for GC controller, at offset 60-61)
     uint8_t lt = 0;
@@ -322,6 +371,7 @@ static void switch2_ble_disconnect(bthid_device_t* device)
 
         init_input_event(&sw2->event);
         sw2->initialized = false;
+        sw2->cal_samples = 0;  // Reset calibration for next connect
     }
 }
 

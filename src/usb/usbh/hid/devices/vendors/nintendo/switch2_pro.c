@@ -109,20 +109,22 @@ static bool is_switch2_pro(uint16_t vid, uint16_t pid) {
   return (vid == 0x057e && (pid == SWITCH2_PRO_PID || pid == SWITCH2_GC_PID));
 }
 
-// Effective stick range from center (Switch sticks reach ~75-80% of theoretical max)
-// Using 1600 instead of 2048 to reach full output range at physical limits
-#define STICK_RANGE 1600
+// Effective stick range from center (different per controller type)
+#define STICK_RANGE_PRO      1610  // Pro Controller axis range
+#define STICK_RANGE_GC       1225  // GameCube main stick range (smaller physical range)
+#define STICK_RANGE_GC_CSTICK 1120 // GameCube C-stick range (even smaller)
 #define CAL_SAMPLES_NEEDED 4  // Number of samples to average for calibration
 
 // Scale calibrated analog value to 8-bit (0-255, 128 = center)
 // val: raw 12-bit value (0-4095)
 // center: calibrated center value
+// range: effective stick range from center to max deflection
 // Returns: 0-255 with 128 as center
-static uint8_t scale_analog_calibrated(uint16_t val, uint16_t center) {
+static uint8_t scale_analog_calibrated(uint16_t val, uint16_t center, uint16_t range) {
   int32_t centered = (int32_t)val - (int32_t)center;
 
   // Scale to -128..+127 range using effective stick range
-  int32_t scaled = (centered * 127) / STICK_RANGE;
+  int32_t scaled = (centered * 127) / range;
 
   // Clamp to valid range
   if (scaled < -128) scaled = -128;
@@ -346,16 +348,21 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
     return;  // Skip input during calibration
   }
 
-  // Scale analog sticks using calibrated centers
-  // Invert Y: Nintendo uses up=high, HID uses up=low
-  uint8_t lx = scale_analog_calibrated(left_x, inst->cal_lx.center);
-  uint8_t ly = 255 - scale_analog_calibrated(left_y, inst->cal_ly.center);
-  uint8_t rx = scale_analog_calibrated(right_x, inst->cal_rx.center);
-  uint8_t ry = 255 - scale_analog_calibrated(right_y, inst->cal_ry.center);
-
   // Map buttons to JP_BUTTON format
   // GameCube controller: swap L1<->L2 and R1<->R2 so the main triggers map to L2/R2
   bool is_gc = (inst->pid == SWITCH2_GC_PID);
+
+  // Scale analog sticks using calibrated centers
+  // Use appropriate range for controller type (GameCube has smaller physical range)
+  // GameCube C-stick (right) has even smaller range than main stick (left)
+  uint16_t left_range = is_gc ? STICK_RANGE_GC : STICK_RANGE_PRO;
+  uint16_t right_range = is_gc ? STICK_RANGE_GC_CSTICK : STICK_RANGE_PRO;
+
+  // Invert Y: Nintendo uses up=high, HID uses up=low
+  uint8_t lx = scale_analog_calibrated(left_x, inst->cal_lx.center, left_range);
+  uint8_t ly = 255 - scale_analog_calibrated(left_y, inst->cal_ly.center, left_range);
+  uint8_t rx = scale_analog_calibrated(right_x, inst->cal_rx.center, right_range);
+  uint8_t ry = 255 - scale_analog_calibrated(right_y, inst->cal_ry.center, right_range);
 
   uint32_t buttons = 0;
   if (rpt.b1) buttons |= JP_BUTTON_B1;  // B (bottom)
