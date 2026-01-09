@@ -89,6 +89,7 @@ typedef struct {
   uint32_t init_delay_ms;   // Timestamp for deferred init
   uint16_t pid;             // Product ID (to distinguish Pro vs GameCube)
   bool haptics_enabled;     // True after reinit on player assign
+  uint8_t init_run_count;   // Number of times init sequence has completed
   // Stick calibration (captured on first reports assuming sticks at rest)
   stick_cal_t cal_lx, cal_ly, cal_rx, cal_ry;
   uint8_t cal_samples;  // Number of samples collected for calibration
@@ -563,9 +564,9 @@ static void reinit_on_player_assign(uint8_t dev_addr, uint8_t instance) {
 static void output_player_led(uint8_t dev_addr, uint8_t instance, uint8_t player_index) {
   switch2_instance_t* inst = &switch2_devices[dev_addr].instances[instance];
 
-  // On first player assignment, re-run full init sequence (Pro only)
+  // On first player assignment, re-run full init sequence
   // This fixes rumble not working after fresh power cycle
-  if (!inst->haptics_enabled && player_index < 4 && inst->pid != SWITCH2_GC_PID) {
+  if (!inst->haptics_enabled && player_index < 4) {
     reinit_on_player_assign(dev_addr, instance);
     return;  // Will send LED after init completes
   }
@@ -689,7 +690,18 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
 
   // Check if done
   if (inst->cmd_index >= SWITCH2_INIT_CMD_COUNT) {
-    printf("[SWITCH2] Initialization complete!\r\n");
+    inst->init_run_count++;
+    printf("[SWITCH2] Init sequence %d complete\r\n", inst->init_run_count);
+
+    // GameCube controller: run init sequence twice for reliable rumble/LED
+    // (empirically discovered - single init doesn't always enable features)
+    if (inst->pid == SWITCH2_GC_PID && inst->init_run_count < 2) {
+      printf("[SWITCH2] GC: re-running init sequence\r\n");
+      inst->cmd_index = 0;
+      inst->cmd_sent = false;
+      return;
+    }
+
     inst->state = SWITCH2_STATE_READY;
     // Re-request HID reports in case they got stuck during bulk init
     if (!tuh_hid_receive_report(dev_addr, instance)) {
