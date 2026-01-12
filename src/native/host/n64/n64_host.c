@@ -10,6 +10,7 @@
 #include "core/router/router.h"
 #include "core/input_event.h"
 #include "core/buttons.h"
+#include "core/services/players/feedback.h"
 #include <hardware/pio.h>
 #include <stdio.h>
 
@@ -21,6 +22,7 @@
 static N64Controller n64_controllers[N64_MAX_PORTS];
 static bool initialized = false;
 static bool rumble_state[N64_MAX_PORTS] = {false};
+static bool rumble_pending[N64_MAX_PORTS] = {false};  // Deferred rumble update flag
 
 // Track previous state for edge detection
 static uint32_t prev_buttons[N64_MAX_PORTS] = {0};
@@ -164,6 +166,19 @@ void n64_host_task(void)
     static bool first_task = true;
     if (first_task) printf("[n64_host] task: starting poll loop\n");
 
+    // Check feedback system for rumble updates (works with any output: DC, USB, etc.)
+    for (int port = 0; port < N64_MAX_PORTS; port++) {
+        feedback_state_t* feedback = feedback_get_state(port);
+        if (feedback && feedback->rumble_dirty) {
+            // N64 rumble is binary (on/off), use max of left/right motors
+            bool want_rumble = (feedback->rumble.left > 0 || feedback->rumble.right > 0);
+            if (want_rumble != rumble_state[port]) {
+                n64_host_set_rumble(port, want_rumble);
+            }
+            // Note: Don't clear dirty flag here - other inputs may also need to read it
+        }
+    }
+
     for (int port = 0; port < N64_MAX_PORTS; port++) {
         N64Controller* controller = &n64_controllers[port];
 
@@ -260,8 +275,30 @@ int8_t n64_host_get_device_type(uint8_t port)
 
 void n64_host_set_rumble(uint8_t port, bool enabled)
 {
-    if (port < N64_MAX_PORTS) {
-        rumble_state[port] = enabled;
+    if (port >= N64_MAX_PORTS) return;
+    if (!initialized) return;
+
+    // Only mark pending if state actually changes
+    if (rumble_state[port] == enabled) return;
+    rumble_state[port] = enabled;
+
+    // Mark as pending - actual send deferred to n64_host_flush_rumble()
+    // This prevents blocking the main loop before Dreamcast response
+    rumble_pending[port] = true;
+}
+
+// Send any pending rumble commands to N64 controller
+// Call this AFTER time-critical tasks (like DC Maple response)
+void n64_host_flush_rumble(void)
+{
+    if (!initialized) return;
+
+    for (uint8_t port = 0; port < N64_MAX_PORTS; port++) {
+        if (rumble_pending[port]) {
+            rumble_pending[port] = false;
+            // Now it's safe to do the blocking joybus write
+            N64Controller_SetRumble(&n64_controllers[port], rumble_state[port]);
+        }
     }
 }
 

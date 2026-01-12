@@ -86,10 +86,15 @@ void app_init(void)
 void app_task(void)
 {
     // Forward rumble from Dreamcast to USB controllers
+    // Only update when value changes to avoid overhead every loop
+    static uint8_t last_rumble = 0;
     if (dreamcast_output_interface.get_rumble) {
         uint8_t rumble = dreamcast_output_interface.get_rumble();
-        for (int i = 0; i < playersCount; i++) {
-            feedback_set_rumble(i, rumble, rumble);
+        if (rumble != last_rumble) {
+            last_rumble = rumble;
+            for (int i = 0; i < playersCount; i++) {
+                feedback_set_rumble(i, rumble, rumble);
+            }
         }
     }
 }

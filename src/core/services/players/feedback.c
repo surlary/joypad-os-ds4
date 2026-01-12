@@ -50,7 +50,9 @@ feedback_state_t* feedback_get_state(uint8_t player_index)
 // Internal rumble setter (bypasses indicator check - for profile_indicator use)
 void feedback_set_rumble_internal(uint8_t player_index, uint8_t left, uint8_t right)
 {
-    if (player_index >= MAX_PLAYERS) return;
+    if (player_index >= MAX_PLAYERS) {
+        return;
+    }
 
     feedback_state_t* state = &feedback_states[player_index];
 

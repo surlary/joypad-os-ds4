@@ -112,8 +112,10 @@ typedef struct {
 //
 // JP -> DC mapping:
 //   B1-B4      -> A, B, X, Y (face buttons)
-//   L1/R1      -> L/R triggers (digital, combined with L2/R2 analog)
-//   L2/R2      -> L/R triggers (analog)
+//   L1         -> L trigger (digital)
+//   R1         -> R trigger (digital)
+//   L2         -> D button (N64 Z, distinct from L for in-game remapping)
+//   R2         -> R trigger (analog)
 //   L3/R3      -> Z, C (extra face buttons)
 //   S1         -> D (arcade stick 2nd start)
 //   S2         -> Start
@@ -121,8 +123,8 @@ typedef struct {
 //   A1 (guide) -> Start
 //
 // This allows:
-//   - N64: L/R (L1/R1) -> DC triggers, C-Up/C-Right (L3/R3) -> DC Z/C
-//   - USB: Bumpers (L1/R1) -> DC triggers, Triggers (L2/R2) -> DC triggers
+//   - N64: L (L1) -> DC L trigger, Z (L2) -> DC D, C-Up/C-Right (L3/R3) -> DC Z/C
+//   - USB: Bumpers (L1/R1) -> DC triggers, Triggers (L2/R2 analog) -> DC triggers
 //
 
 // ============================================================================
@@ -140,6 +142,22 @@ void dreamcast_task(void);
 
 // Update output state from router
 void __not_in_flash_func(dreamcast_update_output)(void);
+
+// Direct state update for low-latency input sources (bypasses router)
+// buttons: DC format (active-low: 0xFFFF = none pressed)
+// axes: 0-255 with 128 = center
+void dreamcast_set_controller_state(uint8_t port, uint16_t buttons,
+                                     uint8_t joy_x, uint8_t joy_y,
+                                     uint8_t joy2_x, uint8_t joy2_y,
+                                     uint8_t lt, uint8_t rt);
+
+// Get rumble state from DC (for feedback to input controllers)
+// Returns rumble power level (0 = off, 1-7 = intensity)
+uint8_t dreamcast_get_rumble(uint8_t port);
+
+// Get raw Puru Puru state for detailed rumble control
+// Returns true if rumble enabled, fills power (0-7), freq, inc
+bool dreamcast_get_purupuru_state(uint8_t port, uint8_t* power, uint8_t* freq, uint8_t* inc);
 
 // OutputInterface accessor
 #include "core/output_interface.h"

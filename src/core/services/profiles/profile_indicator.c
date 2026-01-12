@@ -103,6 +103,22 @@ bool profile_indicator_is_active_for_player(uint8_t player_index)
     return profile_indicator_is_active() && (indicating_player == player_index);
 }
 
+void profile_indicator_cancel_rumble(void)
+{
+    rumble_blinks_remaining = 0;
+    rumble_is_on = false;
+}
+
+// Flag to completely disable profile indicator rumble (for DC output)
+static bool rumble_disabled = false;
+
+void profile_indicator_disable_rumble(void)
+{
+    rumble_disabled = true;
+    rumble_blinks_remaining = 0;
+    rumble_is_on = false;
+}
+
 int8_t profile_indicator_get_display_player_index(int8_t actual_player_index)
 {
     if (led_blinks_remaining > 0) {
@@ -116,7 +132,7 @@ void profile_indicator_task(void)
     absolute_time_t now = get_absolute_time();
 
     // Handle rumble state machine (use internal setters to bypass indicator check)
-    if (rumble_blinks_remaining > 0) {
+    if (rumble_blinks_remaining > 0 && !rumble_disabled) {
         int64_t elapsed = absolute_time_diff_us(rumble_state_change_time, now);
 
         if (rumble_is_on && elapsed >= RUMBLE_ON_TIME_US) {

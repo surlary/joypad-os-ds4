@@ -49,8 +49,12 @@ bool n64_host_is_connected(void);
 // Returns: -1=none, 0=standard controller, 1=with rumble pak, 2=with controller pak
 int8_t n64_host_get_device_type(uint8_t port);
 
-// Set rumble state for a port
+// Set rumble state for a port (non-blocking, defers actual send)
 void n64_host_set_rumble(uint8_t port, bool enabled);
+
+// Flush pending rumble commands (blocking joybus write)
+// Call AFTER time-critical tasks like Dreamcast Maple response
+void n64_host_flush_rumble(void);
 
 // ============================================================================
 // HOST INTERFACE

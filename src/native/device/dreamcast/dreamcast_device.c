@@ -14,6 +14,8 @@
 #include "core/output_interface.h"
 #include "core/router/router.h"
 #include "core/services/players/manager.h"
+#include "core/services/players/feedback.h"
+#include "core/services/profiles/profile_indicator.h"
 #include "core/uart.h"
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
@@ -102,6 +104,19 @@ typedef struct __attribute__((packed)) {
     uint16_t MaxPower;
 } PacketDeviceInfo;
 
+// Extended device info (for ALL_STATUS_REQUEST)
+typedef struct __attribute__((packed)) {
+    uint32_t Func;
+    uint32_t FuncData[3];
+    int8_t AreaCode;
+    uint8_t ConnectorDirection;
+    char ProductName[30];
+    char ProductLicense[60];
+    uint16_t StandbyPower;
+    uint16_t MaxPower;
+    char FreeDeviceStatus[80];  // Extended status string
+} PacketAllDeviceInfo;
+
 typedef struct __attribute__((packed)) {
     uint32_t Condition;
     uint16_t Buttons;
@@ -113,6 +128,24 @@ typedef struct __attribute__((packed)) {
     uint8_t JoyY2;
 } PacketControllerCondition;
 
+// Puru Puru (vibration) info structure
+typedef struct __attribute__((packed)) {
+    uint32_t Func;      // Function type (big endian)
+    uint8_t VSet0;      // Upper nybble = num vibration sources, lower = location/axis
+    uint8_t VSet1;      // b7: Variable intensity, b6: Continuous, b5: Direction, b4: Arbitrary
+    uint8_t FMin;       // Minimum frequency (or fixed freq depending on VA mode)
+    uint8_t FMax;       // Maximum frequency
+} PacketPuruPuruInfo;
+
+// Puru Puru condition structure (for GET_CONDITION response)
+typedef struct __attribute__((packed)) {
+    uint32_t Func;      // Function type (big endian)
+    uint8_t Ctrl;       // Control byte
+    uint8_t Power;      // Vibration intensity
+    uint8_t Freq;       // Vibration frequency
+    uint8_t Inc;        // Vibration inclination
+} PacketPuruPuruCondition;
+
 // Pre-built packet types with BitPairsMinus1 prefix for DMA
 typedef struct __attribute__((packed)) {
     uint32_t BitPairsMinus1;
@@ -120,6 +153,14 @@ typedef struct __attribute__((packed)) {
     PacketDeviceInfo Info;
     uint32_t CRC;
 } FInfoPacket;
+
+// Extended info packet (for ALL_STATUS_REQUEST response)
+typedef struct __attribute__((packed)) {
+    uint32_t BitPairsMinus1;
+    PacketHeader Header;
+    PacketAllDeviceInfo Info;
+    uint32_t CRC;
+} FAllInfoPacket;
 
 typedef struct __attribute__((packed)) {
     uint32_t BitPairsMinus1;
@@ -134,6 +175,45 @@ typedef struct __attribute__((packed)) {
     uint32_t CRC;
 } FACKPacket;
 
+// Puru Puru device info packet
+typedef struct __attribute__((packed)) {
+    uint32_t BitPairsMinus1;
+    PacketHeader Header;
+    PacketDeviceInfo Info;
+    uint32_t CRC;
+} FPuruPuruDeviceInfoPacket;
+
+// Puru Puru media info packet (capabilities)
+typedef struct __attribute__((packed)) {
+    uint32_t BitPairsMinus1;
+    PacketHeader Header;
+    PacketPuruPuruInfo Info;
+    uint32_t CRC;
+} FPuruPuruInfoPacket;
+
+// Puru Puru condition packet
+typedef struct __attribute__((packed)) {
+    uint32_t BitPairsMinus1;
+    PacketHeader Header;
+    PacketPuruPuruCondition Condition;
+    uint32_t CRC;
+} FPuruPuruConditionPacket;
+
+// Puru Puru block read data structure
+typedef struct __attribute__((packed)) {
+    uint32_t Func;      // Function type (big endian)
+    uint32_t Address;   // Block address
+    uint8_t Data[4];    // AST data (4 bytes per read)
+} PacketPuruPuruBlockRead;
+
+// Puru Puru block read response packet
+typedef struct __attribute__((packed)) {
+    uint32_t BitPairsMinus1;
+    PacketHeader Header;
+    PacketPuruPuruBlockRead BlockRead;
+    uint32_t CRC;
+} FPuruPuruBlockReadPacket;
+
 // ============================================================================
 // BUFFERS
 // ============================================================================
@@ -145,8 +225,31 @@ static uint8_t Packet[1024 + 8] __attribute__((aligned(4)));
 
 // Pre-built response packets
 static FInfoPacket InfoPacket;
+static FAllInfoPacket AllInfoPacket;
+static FAllInfoPacket PuruPuruAllInfoPacket;
 static FControllerPacket ControllerPacket;
 static FACKPacket ACKPacket;
+static FPuruPuruDeviceInfoPacket PuruPuruDeviceInfoPacket;
+static FPuruPuruInfoPacket PuruPuruInfoPacket;
+static FPuruPuruConditionPacket PuruPuruConditionPacket;
+static FPuruPuruBlockReadPacket PuruPuruBlockReadPacket;
+
+// Puru Puru AST (Auto-Stop Table) - default 5 second auto-stop
+static uint8_t purupuru_ast[4] = {0x05, 0x00, 0x00, 0x00};
+
+// Puru Puru condition state (what DC last sent us)
+static uint8_t purupuru_ctrl[MAX_PLAYERS] = {0};
+static uint8_t purupuru_power[MAX_PLAYERS] = {0};
+static uint8_t purupuru_freq[MAX_PLAYERS] = {0};
+static uint8_t purupuru_inc[MAX_PLAYERS] = {0};
+
+// Deferred rumble update flag - set in ConsumePacket, processed after all packets
+// This keeps packet processing fast to avoid DC timeout/disconnection
+static volatile bool purupuru_updated[MAX_PLAYERS] = {false};
+
+// Rumble timeout - DC doesn't send explicit "stop", it just stops sending commands
+static uint32_t last_rumble_time[MAX_PLAYERS] = {0};
+#define RUMBLE_TIMEOUT_MS 300  // Turn off rumble if no command for 300ms
 
 // ============================================================================
 // CONTROLLER STATE
@@ -163,8 +266,14 @@ static uint8_t dc_rumble[MAX_PLAYERS];
 typedef enum {
     SEND_NOTHING,
     SEND_CONTROLLER_INFO,
+    SEND_CONTROLLER_ALL_INFO,   // Extended device info for controller
     SEND_CONTROLLER_STATUS,
     SEND_ACK,
+    SEND_PURUPURU_INFO,         // Device info for Puru Puru
+    SEND_PURUPURU_ALL_INFO,     // Extended device info for Puru Puru
+    SEND_PURUPURU_MEDIA_INFO,   // Media info (capabilities)
+    SEND_PURUPURU_CONDITION,    // Current vibration state
+    SEND_PURUPURU_BLOCK_READ,   // AST block read response
 } ESendState;
 
 static volatile ESendState NextPacketSend = SEND_NOTHING;
@@ -173,7 +282,7 @@ static volatile ESendState NextPacketSend = SEND_NOTHING;
 // CRC CALCULATION
 // ============================================================================
 
-static uint32_t CalcCRC(const uint32_t *Words, uint32_t NumWords)
+static uint32_t __not_in_flash_func(CalcCRC)(const uint32_t *Words, uint32_t NumWords)
 {
     uint32_t XOR = 0;
     for (uint32_t i = 0; i < NumWords; i++) {
@@ -188,13 +297,17 @@ static uint32_t CalcCRC(const uint32_t *Words, uint32_t NumWords)
 // PACKET BUILDERS
 // ============================================================================
 
+// Define combined address for controller + sub-peripherals
+#define ADDRESS_CONTROLLER_AND_SUBS (ADDRESS_CONTROLLER | ADDRESS_SUBPERIPHERAL1)
+
 static void BuildInfoPacket(void)
 {
     InfoPacket.BitPairsMinus1 = (sizeof(InfoPacket) - 7) * 4 - 1;
 
     InfoPacket.Header.Command = CMD_RESPOND_DEVICE_STATUS;
     InfoPacket.Header.Destination = ADDRESS_DREAMCAST;
-    InfoPacket.Header.Origin = ADDRESS_CONTROLLER;
+    // Advertise controller + Puru Puru sub-peripheral
+    InfoPacket.Header.Origin = ADDRESS_CONTROLLER_AND_SUBS;
     InfoPacket.Header.NumWords = sizeof(InfoPacket.Info) / sizeof(uint32_t);
 
     InfoPacket.Info.Func = __builtin_bswap32(FUNC_CONTROLLER);
@@ -213,13 +326,150 @@ static void BuildInfoPacket(void)
     InfoPacket.CRC = CalcCRC((uint32_t *)&InfoPacket.Header, sizeof(InfoPacket) / sizeof(uint32_t) - 2);
 }
 
+static void BuildAllInfoPacket(void)
+{
+    AllInfoPacket.BitPairsMinus1 = (sizeof(AllInfoPacket) - 7) * 4 - 1;
+
+    AllInfoPacket.Header.Command = CMD_RESPOND_ALL_DEVICE_STATUS;
+    AllInfoPacket.Header.Destination = ADDRESS_DREAMCAST;
+    AllInfoPacket.Header.Origin = ADDRESS_CONTROLLER_AND_SUBS;
+    AllInfoPacket.Header.NumWords = sizeof(AllInfoPacket.Info) / sizeof(uint32_t);
+
+    AllInfoPacket.Info.Func = __builtin_bswap32(FUNC_CONTROLLER);
+    AllInfoPacket.Info.FuncData[0] = __builtin_bswap32(0x000f06fe);  // Buttons supported
+    AllInfoPacket.Info.FuncData[1] = 0;
+    AllInfoPacket.Info.FuncData[2] = 0;
+    AllInfoPacket.Info.AreaCode = -1;
+    AllInfoPacket.Info.ConnectorDirection = 0;
+    strncpy(AllInfoPacket.Info.ProductName, "Dreamcast Controller          ", sizeof(AllInfoPacket.Info.ProductName));
+    strncpy(AllInfoPacket.Info.ProductLicense,
+            "Produced By or Under License From SEGA ENTERPRISES,LTD.     ",
+            sizeof(AllInfoPacket.Info.ProductLicense));
+    AllInfoPacket.Info.StandbyPower = 430;
+    AllInfoPacket.Info.MaxPower = 500;
+    strncpy(AllInfoPacket.Info.FreeDeviceStatus,
+            "Version 1.010,1998/09/28,315-6125-AB   ,Analog Module : The 4th Edition. 05/08  ",
+            sizeof(AllInfoPacket.Info.FreeDeviceStatus));
+
+    AllInfoPacket.CRC = CalcCRC((uint32_t *)&AllInfoPacket.Header, sizeof(AllInfoPacket) / sizeof(uint32_t) - 2);
+}
+
+static void BuildPuruPuruAllInfoPacket(void)
+{
+    PuruPuruAllInfoPacket.BitPairsMinus1 = (sizeof(PuruPuruAllInfoPacket) - 7) * 4 - 1;
+
+    PuruPuruAllInfoPacket.Header.Command = CMD_RESPOND_ALL_DEVICE_STATUS;
+    PuruPuruAllInfoPacket.Header.Destination = ADDRESS_DREAMCAST;
+    PuruPuruAllInfoPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+    PuruPuruAllInfoPacket.Header.NumWords = sizeof(PuruPuruAllInfoPacket.Info) / sizeof(uint32_t);
+
+    PuruPuruAllInfoPacket.Info.Func = __builtin_bswap32(FUNC_VIBRATION);
+    PuruPuruAllInfoPacket.Info.FuncData[0] = __builtin_bswap32(0x01010000);
+    PuruPuruAllInfoPacket.Info.FuncData[1] = 0;
+    PuruPuruAllInfoPacket.Info.FuncData[2] = 0;
+    PuruPuruAllInfoPacket.Info.AreaCode = -1;
+    PuruPuruAllInfoPacket.Info.ConnectorDirection = 0;
+    strncpy(PuruPuruAllInfoPacket.Info.ProductName, "Puru Puru Pack                ", sizeof(PuruPuruAllInfoPacket.Info.ProductName));
+    strncpy(PuruPuruAllInfoPacket.Info.ProductLicense,
+            "Produced By or Under License From SEGA ENTERPRISES,LTD.     ",
+            sizeof(PuruPuruAllInfoPacket.Info.ProductLicense));
+    PuruPuruAllInfoPacket.Info.StandbyPower = 200;
+    PuruPuruAllInfoPacket.Info.MaxPower = 1600;
+    strncpy(PuruPuruAllInfoPacket.Info.FreeDeviceStatus,
+            "Version 1.000,1998/11/10,315-6211-AH   ,Vibration Motor:1 , Fm:4 - 30Hz ,Pow:7  ",
+            sizeof(PuruPuruAllInfoPacket.Info.FreeDeviceStatus));
+
+    PuruPuruAllInfoPacket.CRC = CalcCRC((uint32_t *)&PuruPuruAllInfoPacket.Header, sizeof(PuruPuruAllInfoPacket) / sizeof(uint32_t) - 2);
+}
+
+static void BuildPuruPuruDeviceInfoPacket(void)
+{
+    PuruPuruDeviceInfoPacket.BitPairsMinus1 = (sizeof(PuruPuruDeviceInfoPacket) - 7) * 4 - 1;
+
+    PuruPuruDeviceInfoPacket.Header.Command = CMD_RESPOND_DEVICE_STATUS;
+    PuruPuruDeviceInfoPacket.Header.Destination = ADDRESS_DREAMCAST;
+    PuruPuruDeviceInfoPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+    PuruPuruDeviceInfoPacket.Header.NumWords = sizeof(PuruPuruDeviceInfoPacket.Info) / sizeof(uint32_t);
+
+    // Puru Puru Pack device info
+    PuruPuruDeviceInfoPacket.Info.Func = __builtin_bswap32(FUNC_VIBRATION);  // 0x100
+    PuruPuruDeviceInfoPacket.Info.FuncData[0] = __builtin_bswap32(0x01010000);  // Vibration function data
+    PuruPuruDeviceInfoPacket.Info.FuncData[1] = 0;
+    PuruPuruDeviceInfoPacket.Info.FuncData[2] = 0;
+    PuruPuruDeviceInfoPacket.Info.AreaCode = -1;  // All regions
+    PuruPuruDeviceInfoPacket.Info.ConnectorDirection = 0;
+    strncpy(PuruPuruDeviceInfoPacket.Info.ProductName, "Puru Puru Pack                ", sizeof(PuruPuruDeviceInfoPacket.Info.ProductName));
+    strncpy(PuruPuruDeviceInfoPacket.Info.ProductLicense,
+            "Produced By or Under License From SEGA ENTERPRISES,LTD.     ",
+            sizeof(PuruPuruDeviceInfoPacket.Info.ProductLicense));
+    PuruPuruDeviceInfoPacket.Info.StandbyPower = 200;
+    PuruPuruDeviceInfoPacket.Info.MaxPower = 1600;
+
+    PuruPuruDeviceInfoPacket.CRC = CalcCRC((uint32_t *)&PuruPuruDeviceInfoPacket.Header, sizeof(PuruPuruDeviceInfoPacket) / sizeof(uint32_t) - 2);
+}
+
+static void BuildPuruPuruInfoPacket(void)
+{
+    PuruPuruInfoPacket.BitPairsMinus1 = (sizeof(PuruPuruInfoPacket) - 7) * 4 - 1;
+
+    PuruPuruInfoPacket.Header.Command = CMD_RESPOND_DATA_TRANSFER;
+    PuruPuruInfoPacket.Header.Destination = ADDRESS_DREAMCAST;
+    PuruPuruInfoPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+    PuruPuruInfoPacket.Header.NumWords = sizeof(PuruPuruInfoPacket.Info) / sizeof(uint32_t);
+
+    PuruPuruInfoPacket.Info.Func = __builtin_bswap32(FUNC_VIBRATION);
+    // VSet0: upper nybble = 1 vibration source, lower = 0 (location/axis)
+    PuruPuruInfoPacket.Info.VSet0 = 0x10;
+    // VSet1: b7=Variable intensity, b6=Continuous, b5=Direction control
+    PuruPuruInfoPacket.Info.VSet1 = 0xE0;
+    // FMin/FMax: supported frequency range (0x07-0x3B Hz)
+    PuruPuruInfoPacket.Info.FMin = 0x07;
+    PuruPuruInfoPacket.Info.FMax = 0x3B;
+
+    PuruPuruInfoPacket.CRC = CalcCRC((uint32_t *)&PuruPuruInfoPacket.Header, sizeof(PuruPuruInfoPacket) / sizeof(uint32_t) - 2);
+}
+
+static void BuildPuruPuruConditionPacket(void)
+{
+    PuruPuruConditionPacket.BitPairsMinus1 = (sizeof(PuruPuruConditionPacket) - 7) * 4 - 1;
+
+    PuruPuruConditionPacket.Header.Command = CMD_RESPOND_DATA_TRANSFER;
+    PuruPuruConditionPacket.Header.Destination = ADDRESS_DREAMCAST;
+    PuruPuruConditionPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+    PuruPuruConditionPacket.Header.NumWords = sizeof(PuruPuruConditionPacket.Condition) / sizeof(uint32_t);
+
+    PuruPuruConditionPacket.Condition.Func = __builtin_bswap32(FUNC_VIBRATION);
+    PuruPuruConditionPacket.Condition.Ctrl = 0x00;
+    PuruPuruConditionPacket.Condition.Power = 0x00;
+    PuruPuruConditionPacket.Condition.Freq = 0x00;
+    PuruPuruConditionPacket.Condition.Inc = 0x00;
+
+    PuruPuruConditionPacket.CRC = CalcCRC((uint32_t *)&PuruPuruConditionPacket.Header, sizeof(PuruPuruConditionPacket) / sizeof(uint32_t) - 2);
+}
+
+static void BuildPuruPuruBlockReadPacket(void)
+{
+    PuruPuruBlockReadPacket.BitPairsMinus1 = (sizeof(PuruPuruBlockReadPacket) - 7) * 4 - 1;
+
+    PuruPuruBlockReadPacket.Header.Command = CMD_RESPOND_DATA_TRANSFER;
+    PuruPuruBlockReadPacket.Header.Destination = ADDRESS_DREAMCAST;
+    PuruPuruBlockReadPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+    PuruPuruBlockReadPacket.Header.NumWords = sizeof(PuruPuruBlockReadPacket.BlockRead) / sizeof(uint32_t);
+
+    PuruPuruBlockReadPacket.BlockRead.Func = __builtin_bswap32(FUNC_VIBRATION);
+    PuruPuruBlockReadPacket.BlockRead.Address = 0;
+    memcpy(PuruPuruBlockReadPacket.BlockRead.Data, purupuru_ast, sizeof(PuruPuruBlockReadPacket.BlockRead.Data));
+
+    PuruPuruBlockReadPacket.CRC = CalcCRC((uint32_t *)&PuruPuruBlockReadPacket.Header, sizeof(PuruPuruBlockReadPacket) / sizeof(uint32_t) - 2);
+}
+
 static void BuildControllerPacket(void)
 {
     ControllerPacket.BitPairsMinus1 = (sizeof(ControllerPacket) - 7) * 4 - 1;
 
     ControllerPacket.Header.Command = CMD_RESPOND_DATA_TRANSFER;
     ControllerPacket.Header.Destination = ADDRESS_DREAMCAST;
-    ControllerPacket.Header.Origin = ADDRESS_CONTROLLER;
+    ControllerPacket.Header.Origin = ADDRESS_CONTROLLER_AND_SUBS;  // Include sub-peripheral bits
     ControllerPacket.Header.NumWords = sizeof(ControllerPacket.Controller) / sizeof(uint32_t);
 
     ControllerPacket.Controller.Condition = __builtin_bswap32(FUNC_CONTROLLER);
@@ -250,7 +500,7 @@ static void BuildACKPacket(void)
 // PACKET SENDING
 // ============================================================================
 
-static void SendPacket(const uint32_t *Words, uint32_t NumWords)
+static void __not_in_flash_func(SendPacket)(const uint32_t *Words, uint32_t NumWords)
 {
     // Fix port number in header (doesn't change CRC as same on Origin and Destination)
     PacketHeader *Header = (PacketHeader *)(Words + 1);
@@ -261,7 +511,7 @@ static void SendPacket(const uint32_t *Words, uint32_t NumWords)
     dma_channel_set_trans_count(tx_dma_channel, NumWords, true);
 }
 
-static void SendControllerStatus(void)
+static void __not_in_flash_func(SendControllerStatus)(void)
 {
     // Update controller state from our state
     ControllerPacket.Controller.Buttons = dc_state[0].buttons;
@@ -285,8 +535,9 @@ static void SendControllerStatus(void)
 // Debug counters
 static volatile uint32_t cmd_device_req = 0;
 static volatile uint32_t cmd_get_cond = 0;
+static volatile uint32_t cmd_purupuru_req = 0;
 
-static bool ConsumePacket(uint32_t Size)
+static bool __not_in_flash_func(ConsumePacket)(uint32_t Size)
 {
     if ((Size & 3) != 1) {  // Should be even words + CRC byte
         return false;
@@ -307,48 +558,143 @@ static bool ConsumePacket(uint32_t Size)
     // Mask off port number
     uint8_t DestPeripheral = Header->Destination & ADDRESS_PERIPHERAL_MASK;
 
-    // Only respond to main controller requests
-    if (DestPeripheral != ADDRESS_CONTROLLER) {
-        return false;
+    // Handle main controller requests (address 0x20)
+    if (DestPeripheral == ADDRESS_CONTROLLER) {
+        switch (Header->Command) {
+        case CMD_RESET_DEVICE:
+            // ACK with controller + sub-peripherals
+            ACKPacket.Header.Origin = ADDRESS_CONTROLLER_AND_SUBS;
+            ACKPacket.CRC = CalcCRC((uint32_t *)&ACKPacket.Header, sizeof(ACKPacket) / sizeof(uint32_t) - 2);
+            NextPacketSend = SEND_ACK;
+            return true;
+
+        case CMD_DEVICE_REQUEST:
+            cmd_device_req++;
+            NextPacketSend = SEND_CONTROLLER_INFO;
+            return true;
+
+        case CMD_ALL_STATUS_REQUEST:
+            // Extended device info with FreeDeviceStatus
+            NextPacketSend = SEND_CONTROLLER_ALL_INFO;
+            return true;
+
+        case CMD_GET_CONDITION:
+            cmd_get_cond++;
+            if (Header->NumWords >= 1) {
+                uint32_t Func = __builtin_bswap32(PacketData[0]);
+                if (Func == FUNC_CONTROLLER) {
+                    NextPacketSend = SEND_CONTROLLER_STATUS;
+                    return true;
+                }
+            }
+            break;
+
+        default:
+            break;
+        }
+    }
+    // Handle Puru Puru (rumble pack) requests (address 0x02)
+    else if (DestPeripheral == ADDRESS_SUBPERIPHERAL1) {
+        switch (Header->Command) {
+        case CMD_RESET_DEVICE:
+            ACKPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+            ACKPacket.CRC = CalcCRC((uint32_t *)&ACKPacket.Header, sizeof(ACKPacket) / sizeof(uint32_t) - 2);
+            NextPacketSend = SEND_ACK;
+            return true;
+
+        case CMD_DEVICE_REQUEST:
+            // Return Puru Puru device info
+            cmd_purupuru_req++;
+            NextPacketSend = SEND_PURUPURU_INFO;
+            return true;
+
+        case CMD_ALL_STATUS_REQUEST:
+            // Extended device info with FreeDeviceStatus
+            NextPacketSend = SEND_PURUPURU_ALL_INFO;
+            return true;
+
+        case CMD_GET_MEDIA_INFO:
+            // Return Puru Puru capabilities
+            NextPacketSend = SEND_PURUPURU_MEDIA_INFO;
+            return true;
+
+        case CMD_GET_CONDITION:
+            // Return current vibration state
+            if (Header->NumWords >= 1) {
+                uint32_t Func = __builtin_bswap32(PacketData[0]);
+                if (Func == FUNC_VIBRATION) {
+                    // Update condition packet with current state
+                    PuruPuruConditionPacket.Condition.Ctrl = purupuru_ctrl[0];
+                    PuruPuruConditionPacket.Condition.Power = purupuru_power[0];
+                    PuruPuruConditionPacket.Condition.Freq = purupuru_freq[0];
+                    PuruPuruConditionPacket.Condition.Inc = purupuru_inc[0];
+                    PuruPuruConditionPacket.CRC = CalcCRC((uint32_t *)&PuruPuruConditionPacket.Header,
+                        sizeof(PuruPuruConditionPacket) / sizeof(uint32_t) - 2);
+                    NextPacketSend = SEND_PURUPURU_CONDITION;
+                    return true;
+                }
+            }
+            break;
+
+        case CMD_SET_CONDITION:
+            if (Header->NumWords >= 2) {
+                uint32_t Func = __builtin_bswap32(PacketData[0]);
+                if (Func == FUNC_VIBRATION) {
+                    // Extract rumble data
+                    uint8_t *CondData = (uint8_t *)&PacketData[1];
+                    purupuru_ctrl[0] = CondData[0];
+                    purupuru_power[0] = CondData[1];
+                    purupuru_freq[0] = CondData[2];
+                    purupuru_inc[0] = CondData[3];
+
+                    // Record timestamp for auto-stop timeout
+                    // app_task() will read dc_get_rumble() and set feedback
+                    bool rumble_on = (purupuru_ctrl[0] & 0x10) &&
+                                     (purupuru_freq[0] >= 0x07) &&
+                                     (purupuru_freq[0] <= 0x3B);
+                    if (rumble_on) {
+                        last_rumble_time[0] = time_us_32() / 1000;  // ms
+                    } else {
+                        last_rumble_time[0] = 0;  // Stop rumble
+                    }
+
+                    // Send ACK from Puru Puru address (must match MaplePad)
+                    ACKPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+                    ACKPacket.CRC = CalcCRC((uint32_t *)&ACKPacket.Header, sizeof(ACKPacket) / sizeof(uint32_t) - 2);
+                    NextPacketSend = SEND_ACK;
+                    return true;
+                }
+            }
+            break;
+
+        case CMD_BLOCK_READ:
+            // Puru Puru AST (Auto Stop Table) read - return AST data
+            NextPacketSend = SEND_PURUPURU_BLOCK_READ;
+            return true;
+
+        case CMD_BLOCK_WRITE:
+            // Puru Puru AST (Auto Stop Table) write - store and ACK
+            if (Header->NumWords >= 2) {
+                // Data starts at PacketData[2] (after Func and Address)
+                uint8_t *WriteData = (uint8_t *)&PacketData[2];
+                // Copy up to 4 bytes of AST data
+                uint8_t bytes_to_copy = (Header->NumWords - 2) * 4;
+                if (bytes_to_copy > sizeof(purupuru_ast)) {
+                    bytes_to_copy = sizeof(purupuru_ast);
+                }
+                memcpy(purupuru_ast, WriteData, bytes_to_copy);
+            }
+            ACKPacket.Header.Origin = ADDRESS_SUBPERIPHERAL1;
+            ACKPacket.CRC = CalcCRC((uint32_t *)&ACKPacket.Header, sizeof(ACKPacket) / sizeof(uint32_t) - 2);
+            NextPacketSend = SEND_ACK;
+            return true;
+
+        default:
+            break;
+        }
     }
 
-    switch (Header->Command) {
-    case CMD_RESET_DEVICE:
-        NextPacketSend = SEND_ACK;
-        break;
-
-    case CMD_DEVICE_REQUEST:
-        cmd_device_req++;
-        NextPacketSend = SEND_CONTROLLER_INFO;
-        break;
-
-    case CMD_GET_CONDITION:
-        cmd_get_cond++;
-        if (Header->NumWords >= 1) {
-            uint32_t Func = __builtin_bswap32(PacketData[0]);
-            if (Func == FUNC_CONTROLLER) {
-                NextPacketSend = SEND_CONTROLLER_STATUS;
-            }
-        }
-        break;
-
-    case CMD_SET_CONDITION:
-        if (Header->NumWords >= 2) {
-            uint32_t Func = __builtin_bswap32(PacketData[0]);
-            if (Func == FUNC_VIBRATION) {
-                // Extract rumble data
-                uint8_t *CondData = (uint8_t *)&PacketData[1];
-                dc_rumble[0] = CondData[1];  // Power byte
-            }
-        }
-        NextPacketSend = SEND_ACK;
-        break;
-
-    default:
-        break;
-    }
-
-    return true;
+    return false;
 }
 
 // ============================================================================
@@ -365,13 +711,15 @@ static uint16_t map_buttons_to_dc(uint32_t jp_buttons)
     if (jp_buttons & JP_BUTTON_B3) dc_buttons |= DC_BTN_X;
     if (jp_buttons & JP_BUTTON_B4) dc_buttons |= DC_BTN_Y;
 
-    // L1/R1/L2/R2 -> triggers (handled in analog section, not buttons)
+    // L1/R1 -> triggers (handled in analog section)
+    // L2 -> D button (N64 Z, distinct from L trigger for in-game remapping)
+    if (jp_buttons & JP_BUTTON_L2) dc_buttons |= DC_BTN_D;
 
     // L3/R3 -> extra face buttons Z/C
     if (jp_buttons & JP_BUTTON_L3) dc_buttons |= DC_BTN_Z;
     if (jp_buttons & JP_BUTTON_R3) dc_buttons |= DC_BTN_C;
 
-    // S1 -> D, S2 -> Start
+    // S1 -> D (also), S2 -> Start
     if (jp_buttons & JP_BUTTON_S1) dc_buttons |= DC_BTN_D;
     if (jp_buttons & JP_BUTTON_S2) dc_buttons |= DC_BTN_START;
 
@@ -410,10 +758,11 @@ void __not_in_flash_func(dreamcast_update_output)(void)
         dc_state[port].joy2_x = event->analog[ANALOG_RX];
         dc_state[port].joy2_y = event->analog[ANALOG_RY];
 
-        // L trigger: L1 (bumper) OR L2 (trigger) - accepts both
-        // L1 = N64 L, L2 = N64 Z or USB analog trigger
+        // L trigger: L1 (bumper) or analog L2 - NOT digital L2
+        // L1 = N64 L, analog L2 = USB analog trigger
+        // Digital L2 (N64 Z) goes to D button instead for distinct mapping
         uint8_t lt = event->analog[ANALOG_L2];
-        if (event->buttons & (JP_BUTTON_L1 | JP_BUTTON_L2)) lt = 255;
+        if (event->buttons & JP_BUTTON_L1) lt = 255;
         dc_state[port].lt = lt;
 
         // R trigger: R1 (bumper) OR R2 (trigger) - accepts both
@@ -512,14 +861,56 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
             rx_ends_count++;
             if (XOR == 0) {  // CRC valid
                 rx_crc_ok++;
-                // Write to ring buffer instead of FIFO (FIFO used by flash lockout)
-                uint32_t next_write = (packet_end_write + 1) & 15;
-                if (next_write != packet_end_read) {  // Not full
-                    packet_ends[packet_end_write] = Offset;
-                    packet_end_write = next_write;
-                    __sev();  // Wake Core0
-                    StartOfPacket = ((Offset + 3) & ~3);  // Align for swizzling
+
+                // Process and respond IMMEDIATELY on Core 1 (like GameCube)
+                // Copy and byte-swap packet data from RxBuffer to Packet buffer
+                // (ConsumePacket reads from Packet, not RxBuffer)
+                uint32_t packet_size = Offset - StartOfPacket;
+                for (uint32_t j = StartOfPacket; j < Offset; j += 4) {
+                    *(uint32_t *)&Packet[j - StartOfPacket] =
+                        __builtin_bswap32(*(uint32_t *)&RxBuffer[j & (RX_BUFFER_SIZE - 1)]);
                 }
+
+                // Process packet and prepare response
+                ConsumePacket(packet_size);
+
+                // Send response immediately via DMA
+                if (NextPacketSend != SEND_NOTHING && !dma_channel_is_busy(tx_dma_channel)) {
+                    switch (NextPacketSend) {
+                    case SEND_CONTROLLER_INFO:
+                        SendPacket((uint32_t *)&InfoPacket, sizeof(InfoPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_CONTROLLER_ALL_INFO:
+                        SendPacket((uint32_t *)&AllInfoPacket, sizeof(AllInfoPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_CONTROLLER_STATUS:
+                        SendControllerStatus();
+                        break;
+                    case SEND_ACK:
+                        SendPacket((uint32_t *)&ACKPacket, sizeof(ACKPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_PURUPURU_INFO:
+                        SendPacket((uint32_t *)&PuruPuruDeviceInfoPacket, sizeof(PuruPuruDeviceInfoPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_PURUPURU_ALL_INFO:
+                        SendPacket((uint32_t *)&PuruPuruAllInfoPacket, sizeof(PuruPuruAllInfoPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_PURUPURU_MEDIA_INFO:
+                        SendPacket((uint32_t *)&PuruPuruInfoPacket, sizeof(PuruPuruInfoPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_PURUPURU_CONDITION:
+                        SendPacket((uint32_t *)&PuruPuruConditionPacket, sizeof(PuruPuruConditionPacket) / sizeof(uint32_t));
+                        break;
+                    case SEND_PURUPURU_BLOCK_READ:
+                        SendPacket((uint32_t *)&PuruPuruBlockReadPacket, sizeof(PuruPuruBlockReadPacket) / sizeof(uint32_t));
+                        break;
+                    default:
+                        break;
+                    }
+                    NextPacketSend = SEND_NOTHING;
+                }
+
+                StartOfPacket = ((Offset + 3) & ~3);  // Align for next packet
             } else {
                 rx_crc_fails++;
             }
@@ -600,6 +991,9 @@ void dreamcast_init(void)
 
     printf("[DC] Initializing Dreamcast Maple Bus output...\n");
 
+    // Disable profile indicator rumble - DC manages its own rumble from console
+    profile_indicator_disable_rumble();
+
     // Initialize controller states
     for (int i = 0; i < MAX_PLAYERS; i++) {
         dc_state[i].buttons = 0xFFFF;
@@ -614,8 +1008,14 @@ void dreamcast_init(void)
 
     // Build pre-built packets
     BuildInfoPacket();
+    BuildAllInfoPacket();
     BuildControllerPacket();
     BuildACKPacket();
+    BuildPuruPuruDeviceInfoPacket();
+    BuildPuruPuruAllInfoPacket();
+    BuildPuruPuruInfoPacket();
+    BuildPuruPuruConditionPacket();
+    BuildPuruPuruBlockReadPacket();
 
     printf("[DC] Maple Bus initialized on GPIO %d/%d\n", MAPLE_PIN1, MAPLE_PIN5);
 }
@@ -651,36 +1051,12 @@ void dreamcast_task(void)
     }
 
 
-    // Update output state from router
-    dreamcast_update_output();
-
-    // Process packets from core1 and send responses
+    // CRITICAL: Process packets FIRST - this is time-sensitive!
+    // The DC expects responses within a tight window.
+    // All other processing (rumble, router updates) must wait.
+    // MaplePad order: process packet -> send response -> next packet
+    // This minimizes latency between receiving and responding
     while (packet_end_read != packet_end_write) {
-        // CRITICAL: If we have a pending response, we MUST send it before processing
-        // more packets. Otherwise the next packet could overwrite NextPacketSend and
-        // we'd lose a response, causing the Dreamcast to think we disconnected.
-        if (NextPacketSend != SEND_NOTHING) {
-            // Wait for DMA to finish (blocking but necessary for reliable comms)
-            while (dma_channel_is_busy(tx_dma_channel)) {
-                tight_loop_contents();
-            }
-
-            switch (NextPacketSend) {
-            case SEND_CONTROLLER_INFO:
-                SendPacket((uint32_t *)&InfoPacket, sizeof(InfoPacket) / sizeof(uint32_t));
-                break;
-            case SEND_CONTROLLER_STATUS:
-                SendControllerStatus();
-                break;
-            case SEND_ACK:
-                SendPacket((uint32_t *)&ACKPacket, sizeof(ACKPacket) / sizeof(uint32_t));
-                break;
-            default:
-                break;
-            }
-            NextPacketSend = SEND_NOTHING;
-        }
-
         uint32_t end_of_packet = packet_ends[packet_end_read];
         packet_end_read = (packet_end_read + 1) & 15;
         packet_count++;
@@ -694,17 +1070,53 @@ void dreamcast_task(void)
         uint32_t packet_size = end_of_packet - start_of_packet;
         ConsumePacket(packet_size);
         start_of_packet = ((end_of_packet + 3) & ~3);
+
+        // Send response IMMEDIATELY after processing (like MaplePad)
+        // Don't wait for DMA - if it's busy, we're already too slow
+        if (NextPacketSend != SEND_NOTHING && !dma_channel_is_busy(tx_dma_channel)) {
+            switch (NextPacketSend) {
+            case SEND_CONTROLLER_INFO:
+                SendPacket((uint32_t *)&InfoPacket, sizeof(InfoPacket) / sizeof(uint32_t));
+                break;
+            case SEND_CONTROLLER_ALL_INFO:
+                SendPacket((uint32_t *)&AllInfoPacket, sizeof(AllInfoPacket) / sizeof(uint32_t));
+                break;
+            case SEND_CONTROLLER_STATUS:
+                SendControllerStatus();
+                break;
+            case SEND_ACK:
+                SendPacket((uint32_t *)&ACKPacket, sizeof(ACKPacket) / sizeof(uint32_t));
+                break;
+            case SEND_PURUPURU_INFO:
+                SendPacket((uint32_t *)&PuruPuruDeviceInfoPacket, sizeof(PuruPuruDeviceInfoPacket) / sizeof(uint32_t));
+                break;
+            case SEND_PURUPURU_ALL_INFO:
+                SendPacket((uint32_t *)&PuruPuruAllInfoPacket, sizeof(PuruPuruAllInfoPacket) / sizeof(uint32_t));
+                break;
+            case SEND_PURUPURU_MEDIA_INFO:
+                SendPacket((uint32_t *)&PuruPuruInfoPacket, sizeof(PuruPuruInfoPacket) / sizeof(uint32_t));
+                break;
+            case SEND_PURUPURU_CONDITION:
+                SendPacket((uint32_t *)&PuruPuruConditionPacket, sizeof(PuruPuruConditionPacket) / sizeof(uint32_t));
+                break;
+            case SEND_PURUPURU_BLOCK_READ:
+                SendPacket((uint32_t *)&PuruPuruBlockReadPacket, sizeof(PuruPuruBlockReadPacket) / sizeof(uint32_t));
+                break;
+            default:
+                break;
+            }
+            NextPacketSend = SEND_NOTHING;
+        }
     }
 
-    // Send any final pending response
-    if (NextPacketSend != SEND_NOTHING) {
-        while (dma_channel_is_busy(tx_dma_channel)) {
-            tight_loop_contents();
-        }
-
+    // Handle any remaining pending response (shouldn't happen normally)
+    if (NextPacketSend != SEND_NOTHING && !dma_channel_is_busy(tx_dma_channel)) {
         switch (NextPacketSend) {
         case SEND_CONTROLLER_INFO:
             SendPacket((uint32_t *)&InfoPacket, sizeof(InfoPacket) / sizeof(uint32_t));
+            break;
+        case SEND_CONTROLLER_ALL_INFO:
+            SendPacket((uint32_t *)&AllInfoPacket, sizeof(AllInfoPacket) / sizeof(uint32_t));
             break;
         case SEND_CONTROLLER_STATUS:
             SendControllerStatus();
@@ -712,11 +1124,47 @@ void dreamcast_task(void)
         case SEND_ACK:
             SendPacket((uint32_t *)&ACKPacket, sizeof(ACKPacket) / sizeof(uint32_t));
             break;
+        case SEND_PURUPURU_INFO:
+            SendPacket((uint32_t *)&PuruPuruDeviceInfoPacket, sizeof(PuruPuruDeviceInfoPacket) / sizeof(uint32_t));
+            break;
+        case SEND_PURUPURU_ALL_INFO:
+            SendPacket((uint32_t *)&PuruPuruAllInfoPacket, sizeof(PuruPuruAllInfoPacket) / sizeof(uint32_t));
+            break;
+        case SEND_PURUPURU_MEDIA_INFO:
+            SendPacket((uint32_t *)&PuruPuruInfoPacket, sizeof(PuruPuruInfoPacket) / sizeof(uint32_t));
+            break;
+        case SEND_PURUPURU_CONDITION:
+            SendPacket((uint32_t *)&PuruPuruConditionPacket, sizeof(PuruPuruConditionPacket) / sizeof(uint32_t));
+            break;
+        case SEND_PURUPURU_BLOCK_READ:
+            SendPacket((uint32_t *)&PuruPuruBlockReadPacket, sizeof(PuruPuruBlockReadPacket) / sizeof(uint32_t));
+            break;
         default:
             break;
         }
         NextPacketSend = SEND_NOTHING;
     }
+
+    // AFTER packet processing: Update router state and handle rumble
+    // These are lower priority than responding to DC commands
+    dreamcast_update_output();
+
+    // Rumble timeout check - auto-stop if no new commands received
+    uint32_t now_ms = time_us_32() / 1000;
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        purupuru_updated[i] = false;
+
+        // Check if rumble should auto-stop due to timeout
+        if (last_rumble_time[i] != 0) {
+            uint32_t elapsed = now_ms - last_rumble_time[i];
+            if (elapsed > RUMBLE_TIMEOUT_MS) {
+                // Timeout expired - turn off rumble
+                feedback_set_rumble_internal(i, 0, 0);
+                last_rumble_time[i] = 0;
+            }
+        }
+    }
+
 }
 
 
@@ -724,15 +1172,68 @@ void dreamcast_task(void)
 // FEEDBACK ACCESSORS
 // ============================================================================
 
+// Get raw Puru Puru state for a port (can be called from app_task)
+// Returns true if rumble should be active
+bool dreamcast_get_purupuru_state(uint8_t port, uint8_t* power, uint8_t* freq, uint8_t* inc)
+{
+    if (port >= MAX_PLAYERS) return false;
+
+    // ctrl bit 4 (0x10) = vibration enable
+    bool enabled = (purupuru_ctrl[port] & 0x10) != 0;
+
+    if (power) *power = purupuru_power[port];
+    if (freq) *freq = purupuru_freq[port];
+    if (inc) *inc = purupuru_inc[port];
+
+    return enabled;
+}
+
 static uint8_t dc_get_rumble(void)
 {
-    uint8_t max_rumble = 0;
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (dc_rumble[i] > max_rumble) {
-            max_rumble = dc_rumble[i];
-        }
+    // Check if rumble is active (not timed out)
+    if (last_rumble_time[0] == 0) {
+        return 0;
     }
-    return max_rumble;
+
+    // Return the current rumble intensity
+    // ctrl bit 4 (0x10) = enable, freq must be in valid range
+    bool rumble_on = (purupuru_ctrl[0] & 0x10) &&
+                     (purupuru_freq[0] >= 0x07) &&
+                     (purupuru_freq[0] <= 0x3B);
+    if (!rumble_on) {
+        return 0;
+    }
+
+    // Scale power (0-7 typical, but can be higher) to 0-255
+    // Use same calculation as in SET_CONDITION handler
+    return (purupuru_power[0] * 36 > 255) ? 255 : (purupuru_power[0] * 36);
+}
+
+// ============================================================================
+// DIRECT STATE UPDATE (for low-latency input sources like N64)
+// ============================================================================
+
+void dreamcast_set_controller_state(uint8_t port, uint16_t buttons,
+                                     uint8_t joy_x, uint8_t joy_y,
+                                     uint8_t joy2_x, uint8_t joy2_y,
+                                     uint8_t lt, uint8_t rt)
+{
+    if (port >= MAX_PLAYERS) return;
+
+    // Direct write to volatile state - Core 1 reads this immediately
+    dc_state[port].buttons = buttons;
+    dc_state[port].joy_x = joy_x;
+    dc_state[port].joy_y = joy_y;
+    dc_state[port].joy2_x = joy2_x;
+    dc_state[port].joy2_y = joy2_y;
+    dc_state[port].lt = lt;
+    dc_state[port].rt = rt;
+}
+
+uint8_t dreamcast_get_rumble(uint8_t port)
+{
+    if (port >= MAX_PLAYERS) return 0;
+    return dc_rumble[port];
 }
 
 // ============================================================================
