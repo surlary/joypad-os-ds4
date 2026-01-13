@@ -163,6 +163,16 @@ void n64_host_task(void)
 {
     if (!initialized) return;
 
+    static bool first_task = true;
+    static uint32_t poll_count = 0;
+    static uint32_t last_debug_time = 0;
+    static uint32_t last_success_count = 0;
+    if (first_task) {
+        printf("[n64_host] task: starting poll loop\n");
+        printf("[n64_host] GPIO%d state: %d\n", N64_PIN_DATA, gpio_get(N64_PIN_DATA));
+        last_debug_time = time_us_32();
+    }
+
     // Check feedback system for rumble updates (works with any output: DC, USB, etc.)
     for (int port = 0; port < N64_MAX_PORTS; port++) {
         feedback_state_t* feedback = feedback_get_state(port);
@@ -179,13 +189,43 @@ void n64_host_task(void)
     for (int port = 0; port < N64_MAX_PORTS; port++) {
         N64Controller* controller = &n64_controllers[port];
 
+        if (first_task) printf("[n64_host] task: polling port %d, ctrl_init=%d\n",
+                               port, N64Controller_IsInitialized(controller));
+
         // Poll the controller
         n64_report_t report;
         bool success = N64Controller_Poll(controller, &report, rumble_state[port]);
+        poll_count++;
+
+        static uint32_t success_count = 0;
+        if (success) success_count++;
+
+        if (first_task || (success && success_count <= 3)) {
+            printf("[n64_host] task: poll returned %d (total=%lu, success=%lu)\n",
+                   success, poll_count, success_count);
+        }
+        first_task = false;
+
+        // Periodic debug (every 5 seconds)
+        uint32_t now = time_us_32();
+        if (now - last_debug_time > 5000000) {
+            uint32_t delta = success_count - last_success_count;
+            printf("[N64] t=%lus: polls=%lu success=%lu (+%lu/5s)\n",
+                   now / 1000000, poll_count, success_count, delta);
+            last_success_count = success_count;
+            last_debug_time = now;
+        }
 
         if (!success) {
             // Controller not responding, skip
             continue;
+        }
+
+        // Debug: print first few successful reports
+        if (success_count <= 3) {
+            printf("[n64_host] report: btns=0x%04X stick=%d,%d\n",
+                   (report.a | (report.b << 1) | (report.start << 2)),
+                   report.stick_x, report.stick_y);
         }
 
         // Convert analog stick

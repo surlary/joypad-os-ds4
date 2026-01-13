@@ -787,6 +787,17 @@ void __not_in_flash_func(dreamcast_update_output)(void)
 // CORE 1: RX ONLY (must be in RAM for speed)
 // ============================================================================
 
+// Debug counters (volatile for Core0 to read)
+static volatile uint32_t rx_bytes_count = 0;
+static volatile uint32_t rx_resets_count = 0;
+static volatile uint32_t rx_ends_count = 0;
+static volatile uint32_t rx_errors_count = 0;
+static volatile uint32_t rx_crc_fails = 0;
+static volatile uint32_t rx_crc_ok = 0;
+static volatile uint32_t tx_sent_count = 0;  // TX responses sent
+static volatile uint32_t tx_busy_count = 0;  // TX skipped (DMA busy)
+static volatile uint32_t core1_state = 0;  // 0=not started, 1=building, 2=ready, 3=running
+
 // Handshake flags (can't use FIFO - it's used by flash_safe_execute lockout)
 static volatile bool core1_ready = false;
 static volatile bool core0_started_pio = false;
@@ -804,8 +815,12 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
     uint32_t StartOfPacket = 0;
     uint32_t Offset = 0;
 
+    core1_state = 1;  // Building tables
+
     // Build state machine tables
     maple_build_state_machine_tables();
+
+    core1_state = 2;  // Ready, waiting for Core0
 
     // Signal ready to core0 (use flag instead of FIFO - FIFO is used by flash lockout)
     core1_ready = true;
@@ -821,17 +836,25 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
         pio_sm_get(RXPIO, 0);
     }
 
+    core1_state = 3;  // In RX loop
+
     while (true) {
         // Wait for data from RX PIO
         while ((RXPIO->fstat & (1u << PIO_FSTAT_RXEMPTY_LSB)) != 0)
             ;
 
         const uint8_t Value = RXPIO->rxf[0];
+        rx_bytes_count++;
 
         MapleStateMachine M = MapleMachine[State][Value];
         State = M.NewState;
 
+        if (M.Error) {
+            rx_errors_count++;
+        }
+
         if (M.Reset) {
+            rx_resets_count++;
             Offset = StartOfPacket;
             Byte = 0;
             XOR = 0;
@@ -847,7 +870,10 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
         }
 
         if (M.End) {
+            rx_ends_count++;
             if (XOR == 0) {  // CRC valid
+                rx_crc_ok++;
+
 #ifdef CONFIG_DC_CORE1_TX
                 // Process and respond IMMEDIATELY on Core 1 (like GameCube)
                 // Copy and byte-swap packet data from RxBuffer to Packet buffer
@@ -862,8 +888,19 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
                 ConsumePacket(packet_size);
 
                 // Send response immediately via DMA
-                if (NextPacketSend != SEND_NOTHING && !dma_channel_is_busy(tx_dma_channel)) {
-                    switch (NextPacketSend) {
+                if (NextPacketSend != SEND_NOTHING) {
+                    if (dma_channel_is_busy(tx_dma_channel)) {
+                        tx_busy_count++;
+                        // If DMA has been stuck for many packets, abort and reset it
+                        if (tx_busy_count > 50 && (tx_busy_count % 100) == 0) {
+                            dma_channel_abort(tx_dma_channel);
+                            // Small delay for abort to complete
+                            for (volatile int i = 0; i < 100; i++) {}
+                        }
+                    }
+                    if (!dma_channel_is_busy(tx_dma_channel)) {
+                        tx_sent_count++;
+                        switch (NextPacketSend) {
                         case SEND_CONTROLLER_INFO:
                             SendPacket((uint32_t *)&InfoPacket, sizeof(InfoPacket) / sizeof(uint32_t));
                             break;
@@ -893,6 +930,7 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
                             break;
                         default:
                             break;
+                        }
                     }
                     NextPacketSend = SEND_NOTHING;
                 }
@@ -903,6 +941,8 @@ static void __no_inline_not_in_flash_func(core1_rx_task)(void)
 #endif
 
                 StartOfPacket = ((Offset + 3) & ~3);  // Align for next packet
+            } else {
+                rx_crc_fails++;
             }
         }
     }
@@ -1030,6 +1070,9 @@ void dreamcast_task(void)
 {
     static bool setup_done = false;
     static uint32_t start_of_packet = 0;
+    static uint32_t packet_count = 0;
+    static uint32_t last_debug_time = 0;
+    static uint32_t last_rx_ends = 0;
 
     if (!setup_done) {
         // First call - setup TX and RX
@@ -1039,6 +1082,22 @@ void dreamcast_task(void)
         SetupMapleRX();
         setup_done = true;
         printf("[DC] Maple TX/RX started\n");
+        last_debug_time = time_us_32();
+    }
+
+    // Periodic debug output (every 5 seconds)
+    uint32_t now = time_us_32();
+    if (now - last_debug_time > 5000000) {
+        uint32_t rx_delta = rx_ends_count - last_rx_ends;
+        // Check TX PIO and DMA state
+        uint32_t tx_fifo_level = pio_sm_get_tx_fifo_level(TXPIO, tx_sm);
+        uint32_t dma_remaining = dma_channel_hw_addr(tx_dma_channel)->transfer_count;
+        bool dma_busy = dma_channel_is_busy(tx_dma_channel);
+        printf("[DC] t=%lus: rx=%lu(+%lu) tx=%lu busy=%lu fifo=%lu dma_remain=%lu dma_busy=%d\n",
+               now / 1000000, rx_ends_count, rx_delta, tx_sent_count, tx_busy_count,
+               tx_fifo_level, dma_remaining, dma_busy);
+        last_rx_ends = rx_ends_count;
+        last_debug_time = now;
     }
 
     // CRITICAL: Process packets FIRST - this is time-sensitive!
@@ -1049,6 +1108,7 @@ void dreamcast_task(void)
     while (packet_end_read != packet_end_write) {
         uint32_t end_of_packet = packet_ends[packet_end_read];
         packet_end_read = (packet_end_read + 1) & 15;
+        packet_count++;
 
         // Copy and byte-swap packet data
         for (uint32_t j = start_of_packet; j < end_of_packet; j += 4) {
