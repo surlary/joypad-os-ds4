@@ -650,6 +650,23 @@ target_include_directories(joypad_snes2usb PUBLIC
 target_link_libraries(joypad_snes2usb PRIVATE pico_stdlib pico_multicore hardware_pio tinyusb_device tinyusb_board)
 joypad_target_common(joypad_snes2usb)
 
+# --- N642USB (N64 -> USB HID) ---
+add_executable(joypad_n642usb)
+target_compile_definitions(joypad_n642usb PRIVATE CONFIG_N642USB=1 CONFIG_USB=1 DISABLE_USB_HOST=1 N64_PIN_DATA=29)
+target_sources(joypad_n642usb PUBLIC ${CORE_SOURCES} ${USB_DEVICE_SOURCES}
+    ${N64_HOST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642usb/app.c
+)
+target_include_directories(joypad_n642usb PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/n64
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/include
+)
+target_link_libraries(joypad_n642usb PRIVATE pico_stdlib pico_multicore hardware_pio tinyusb_device tinyusb_board)
+joypad_target_common(joypad_n642usb)
+pico_generate_pio_header(joypad_n642usb ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
+
 # ============================================================================
 # CONTROLLER APPS (GPIO/pad input -> USB output)
 # ============================================================================
