@@ -25,6 +25,7 @@ static bool initialized = false;
 static bool rumble_state[N64_MAX_PORTS] = {false};
 static bool rumble_pending[N64_MAX_PORTS] = {false};  // Deferred rumble update flag
 static bool rumble_pak_initialized[N64_MAX_PORTS] = {false};  // Track pak init state
+static uint8_t connected_polls[N64_MAX_PORTS] = {0};  // Count polls after connect for pak init
 
 // Track previous state for edge detection
 static uint32_t prev_buttons[N64_MAX_PORTS] = {0};
@@ -186,8 +187,40 @@ void n64_host_task(void)
         n64_report_t report;
         bool success = N64Controller_Poll(controller, &report, rumble_state[port]);
 
+        // Check connection state using IsInitialized (not poll return value)
+        bool is_connected = N64Controller_IsInitialized(controller);
+
+        if (!is_connected) {
+            // Controller disconnected or not yet initialized
+            if (connected_polls[port] > 0) {
+                connected_polls[port] = 0;
+                rumble_pak_initialized[port] = false;
+                printf("[n64_host] Port %d: disconnected\n", port);
+            }
+        } else if (connected_polls[port] == 0) {
+            // Just connected - start counting polls
+            connected_polls[port] = 1;
+            printf("[n64_host] Port %d: connected\n", port);
+        }
+
+        // Init rumble pak after stable connection (few polls after connect)
+        if (is_connected && connected_polls[port] > 0 && connected_polls[port] < 255) {
+            connected_polls[port]++;
+
+            // Init pak after 10 polls (~170ms at 60Hz)
+            if (connected_polls[port] == 10 && !rumble_pak_initialized[port]) {
+                if (N64Controller_HasPak(controller)) {
+                    printf("[n64_host] Port %d: pak detected, initializing rumble\n", port);
+                    if (N64Controller_InitRumblePak(controller)) {
+                        rumble_pak_initialized[port] = true;
+                        printf("[n64_host] Port %d: rumble pak initialized\n", port);
+                    }
+                }
+            }
+        }
+
+        // Skip input processing if poll didn't return data
         if (!success) {
-            // Controller not responding, skip
             continue;
         }
 
@@ -312,14 +345,10 @@ void n64_host_flush_rumble(void)
             rumble_pending[port] = false;
             last_rumble_time[port] = make_timeout_time_ms(RUMBLE_MIN_INTERVAL_MS);
 
-            // Initialize rumble pak on first rumble-on request
-            if (rumble_state[port] && !rumble_pak_initialized[port]) {
-                N64Controller_InitRumblePak(&n64_controllers[port]);
-                rumble_pak_initialized[port] = true;
+            // Only send rumble if pak was initialized on connect
+            if (rumble_pak_initialized[port]) {
+                N64Controller_SetRumble(&n64_controllers[port], rumble_state[port]);
             }
-
-            // Now it's safe to do the blocking joybus write
-            N64Controller_SetRumble(&n64_controllers[port], rumble_state[port]);
         }
     }
 }
