@@ -4,9 +4,11 @@
 // This app polls native N64 controllers via joybus and outputs USB HID gamepad.
 
 #include "app.h"
+#include "profiles.h"
 #include "core/router/router.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
+#include "core/services/profiles/profile.h"
 #include "core/input_interface.h"
 #include "core/output_interface.h"
 #include "usb/usbd/usbd.h"
@@ -73,9 +75,17 @@ void app_init(void)
     };
     players_init_with_config(&player_cfg);
 
+    // Initialize profile system with N64 profiles
+    static const profile_config_t profile_cfg = {
+        .output_profiles = { NULL },
+        .shared_profiles = &n642usb_profile_set,
+    };
+    profile_init(&profile_cfg);
+
     printf("[app:n642usb] Initialization complete\n");
     printf("[app:n642usb]   Routing: N64 -> USB HID Gamepad\n");
     printf("[app:n642usb]   N64 data pin: GPIO%d\n", N64_DATA_PIN);
+    printf("[app:n642usb]   Profiles: %d (Select+DPad to cycle)\n", n642usb_profile_set.profile_count);
 }
 
 // ============================================================================
