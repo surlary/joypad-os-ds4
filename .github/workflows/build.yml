@@ -119,6 +119,20 @@ jobs:
           path: artifacts/usb2loopy/*.uf2
           if-no-files-found: ignore
 
+      - name: Upload usb2dc artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: joypad_${{ steps.commit.outputs.hash }}_usb2dc
+          path: artifacts/usb2dc/*.uf2
+          if-no-files-found: ignore
+
+      - name: Upload n642dc artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: joypad_${{ steps.commit.outputs.hash }}_n642dc
+          path: artifacts/n642dc/*.uf2
+          if-no-files-found: ignore
+
       - name: Upload usb23do artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -159,6 +173,13 @@ jobs:
         with:
           name: joypad_${{ steps.commit.outputs.hash }}_snes2usb
           path: artifacts/snes2usb/*.uf2
+          if-no-files-found: ignore
+
+      - name: Upload n642usb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: joypad_${{ steps.commit.outputs.hash }}_n642usb
+          path: artifacts/n642usb/*.uf2
           if-no-files-found: ignore
 
       - name: Upload controller artifacts
@@ -330,6 +351,9 @@ jobs:
             | usb2pce | PC Engine / TurboGrafx-16 | KB2040 |
             | usb2gc | Nintendo GameCube | KB2040 |
             | usb2nuon | VM Labs Nuon | KB2040 |
+            | usb2dc | Sega Dreamcast | KB2040 |
+            | n642dc | N64 to Dreamcast | KB2040 |
+            | n642usb | N64 to USB | KB2040 |
           files: |
             releases/*
           draft: false
