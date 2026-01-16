@@ -211,6 +211,13 @@ set(N64_HOST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/N64Controller.c
 )
 
+# GC host sources (GameCube controller reading)
+set(GC_HOST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/gc/gc_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/joybus.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/GamecubeController.c
+)
+
 # Controller app common sources
 set(CONTROLLER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/pad/pad_input.c
@@ -668,6 +675,23 @@ target_include_directories(joypad_n642usb PUBLIC
 target_link_libraries(joypad_n642usb PRIVATE pico_stdlib pico_multicore hardware_pio tinyusb_device tinyusb_board)
 joypad_target_common(joypad_n642usb)
 pico_generate_pio_header(joypad_n642usb ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
+
+# --- GC2USB (GameCube -> USB HID) ---
+add_executable(joypad_gc2usb)
+target_compile_definitions(joypad_gc2usb PRIVATE CONFIG_GC2USB=1 CONFIG_USB=1 DISABLE_USB_HOST=1 GC_PIN_DATA=29)
+target_sources(joypad_gc2usb PUBLIC ${CORE_SOURCES} ${USB_DEVICE_SOURCES}
+    ${GC_HOST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/gc2usb/app.c
+)
+target_include_directories(joypad_gc2usb PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/gc2usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/gc
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/include
+)
+target_link_libraries(joypad_gc2usb PRIVATE pico_stdlib pico_multicore hardware_pio tinyusb_device tinyusb_board)
+joypad_target_common(joypad_gc2usb)
+pico_generate_pio_header(joypad_gc2usb ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
 
 # ============================================================================
 # CONTROLLER APPS (GPIO/pad input -> USB output)
