@@ -296,11 +296,11 @@ void __not_in_flash_func(read_inputs)(void)
     if (event->buttons & JP_BUTTON_DL) normal &= ~(1 << 3);
     
     // D-pad from left analog stick (threshold at 64/192 from center 128)
-    // Note: Y-axis is inverted (low = down, high = up) to match controller convention
+    // HID convention: 0=up, 128=center, 255=down
     if (event->analog[0] < 64)  normal &= ~(1 << 3);  // Left
     if (event->analog[0] > 192) normal &= ~(1 << 1);  // Right
-    if (event->analog[1] < 64)  normal &= ~(1 << 2);  // Down (Y-inverted)
-    if (event->analog[1] > 192) normal &= ~(1 << 0);  // Up (Y-inverted)
+    if (event->analog[1] < 64)  normal &= ~(1 << 0);  // Up (low Y = stick up)
+    if (event->analog[1] > 192) normal &= ~(1 << 2);  // Down (high Y = stick down)
     if (event->buttons & JP_BUTTON_B2) normal &= ~(1 << 4);  // I
     if (event->buttons & JP_BUTTON_B1) normal &= ~(1 << 5);  // II
     if (event->buttons & JP_BUTTON_S1) normal &= ~(1 << 6);  // Select
