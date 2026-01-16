@@ -9,12 +9,12 @@ Joypad OS (formerly **USBRetro**) is firmware for RP2040-based adapters that pro
 **Inputs:**
 - USB HID controllers, keyboards, mice
 - USB X-input (Xbox controllers)
-- Bluetooth controllers (via USB BT dongle)
-- Native controllers (SNES)
+- Bluetooth controllers (via USB BT dongle or Pico W)
+- Native controllers (SNES, N64, GameCube via joybus)
 
 **Outputs:**
-- Retro consoles: PCEngine, GameCube, Nuon, 3DO, Loopy
-- USB Device: HID gamepad, XInput, DirectInput
+- Retro consoles: PCEngine, GameCube, Dreamcast, Nuon, 3DO, Loopy
+- USB Device: HID gamepad, XInput, DirectInput, PS3/PS4/Switch modes
 - UART: ESP32 Bluetooth bridge
 
 Uses TinyUSB for USB, BTstack for Bluetooth, and RP2040 PIO for timing-critical console protocols.
@@ -32,13 +32,18 @@ git clone https://github.com/joypad-ai/joypad-os.git
 cd joypad-os
 make init
 
-# Build apps
-make usb2pce       # USB/BT → PCEngine
-make usb2gc        # USB/BT → GameCube
-make usb2nuon      # USB/BT → Nuon
-make usb23do       # USB/BT → 3DO
-make usb2usb       # USB/BT → USB HID
-make snes2usb      # SNES → USB HID
+# Build apps (append _kb2040, _rp2040zero, etc. for specific boards)
+make usb2pce_kb2040    # USB/BT → PCEngine
+make usb2gc_kb2040     # USB/BT → GameCube
+make usb2dc_kb2040     # USB/BT → Dreamcast
+make usb2nuon_kb2040   # USB/BT → Nuon
+make usb23do_rp2040zero # USB/BT → 3DO
+make usb2usb_feather   # USB/BT → USB HID
+make snes2usb_kb2040   # SNES → USB HID
+make n642usb_kb2040    # N64 → USB HID
+make gc2usb_kb2040     # GameCube → USB HID
+make n642dc_kb2040     # N64 → Dreamcast
+make bt2usb_pico_w     # BT-only → USB HID (Pico W)
 
 # Build all
 make all
@@ -46,11 +51,10 @@ make clean
 
 # Flash (macOS - looks for /Volumes/RPI-RP2)
 make flash              # Flash most recent build
-make flash-usb2pce      # Flash specific app
-make flash-usb2gc
+make flash-usb2pce_kb2040  # Flash specific app
 ```
 
-Output: `releases/usbr_<commit>_<board>_<app>.uf2`
+Output: `releases/joypad_<commit>_<app>_<board>.uf2`
 
 ### App Build Matrix
 
@@ -58,11 +62,16 @@ Output: `releases/usbr_<commit>_<board>_<app>.uf2`
 |-----|-------|-------|--------|
 | `usb2pce` | KB2040 | USB/BT | PCEngine |
 | `usb2gc` | KB2040 | USB/BT | GameCube |
+| `usb2dc` | KB2040 | USB/BT | Dreamcast |
 | `usb2nuon` | KB2040 | USB/BT | Nuon |
 | `usb23do` | RP2040-Zero | USB/BT | 3DO |
 | `usb2loopy` | KB2040 | USB/BT | Loopy |
-| `usb2usb` | Feather USB Host | USB/BT | USB HID |
+| `usb2usb` | Feather/RP2040-Zero | USB/BT | USB HID |
+| `bt2usb` | Pico W/Pico 2 W | BT-only | USB HID |
 | `snes2usb` | KB2040 | SNES | USB HID |
+| `n642usb` | KB2040 | N64 | USB HID |
+| `gc2usb` | KB2040 | GameCube | USB HID |
+| `n642dc` | KB2040 | N64 | Dreamcast |
 | `snes23do` | RP2040-Zero | SNES | 3DO |
 | `usb2uart` | KB2040 | USB | UART/ESP32 |
 | `controller_*` | Various | GPIO | USB HID |
@@ -116,12 +125,15 @@ src/
     ├── device/                 # Console outputs (we emulate devices)
     │   ├── pcengine/           # PCEngine multitap (PIO)
     │   ├── gamecube/           # GameCube joybus (PIO)
+    │   ├── dreamcast/          # Dreamcast maple bus (PIO)
     │   ├── nuon/               # Nuon polyface (PIO)
     │   ├── 3do/                # 3DO controller (PIO)
     │   ├── loopy/              # Casio Loopy (PIO)
     │   └── uart/               # UART output
     └── host/                   # Native inputs (we read controllers)
-        └── snes/               # SNES controller reading
+        ├── snes/               # SNES controller reading
+        ├── n64/                # N64 controller reading (joybus)
+        └── gc/                 # GameCube controller reading (joybus)
 ```
 
 ### Data Flow
@@ -131,9 +143,10 @@ Input Sources                    Router                      Output Targets
 ─────────────                    ──────                      ──────────────
 USB HID ──────┐                                              ┌──→ PCEngine
 USB X-input ──┤                                              ├──→ GameCube
-Bluetooth ────┼──→ router_submit_input() ──→ router ──→ ────┼──→ Nuon, 3DO
-Native SNES ──┘                              │               ├──→ USB Device
-                                             │               └──→ UART
+Bluetooth ────┼──→ router_submit_input() ──→ router ──→ ────┼──→ Dreamcast
+Native SNES ──┤                              │               ├──→ Nuon, 3DO
+Native N64 ───┤                              │               ├──→ USB Device
+Native GC ────┘                              │               └──→ UART
                                     profile_apply()
                                     (button remapping)
 ```
@@ -210,9 +223,11 @@ W3C Gamepad API order - bit position = button index:
 Console protocols use RP2040 PIO for precise timing:
 - **PCEngine**: `plex.pio`, `clock.pio`, `select.pio`
 - **GameCube**: `joybus.pio` (130MHz clock required)
+- **Dreamcast**: `maple.pio` (maple bus protocol)
 - **Nuon**: `polyface_read.pio`, `polyface_send.pio`
 - **3DO**: `sampling.pio`, `output.pio`
 - **Loopy**: `loopy.pio`
+- **N64/GC Host**: `joybus.pio` (shared with GC device)
 
 ## Development Workflow
 
@@ -250,12 +265,34 @@ Console protocols use RP2040 PIO for precise timing:
 
 3. Register in BT device registry
 
+### Adding a Native Controller Host (like gc_host, n64_host)
+
+1. Create `src/native/host/<protocol>/<protocol>_host.c/h`
+
+2. Implement `HostInterface` and `InputInterface`:
+   ```c
+   extern const HostInterface <protocol>_host_interface;
+   extern const InputInterface <protocol>_input_interface;
+   ```
+
+3. Add `INPUT_SOURCE_NATIVE_<PROTOCOL>` to `router.h`
+
+4. Key functions:
+   - `<protocol>_host_init()` - Initialize PIO/GPIO
+   - `<protocol>_host_task()` - Poll controller, submit to router
+   - Use `router_submit_input()` with dev_addr 0xD0+ range
+
+5. Remember to invert Y-axis if protocol uses non-HID convention
+
 ## Common Pitfalls
 
 - **GameCube requires 130MHz** - `set_sys_clock_khz(130000, true)`
 - **PIO has 32 instruction limit** - Optimize or split programs
 - **Use `__not_in_flash_func`** - For timing-critical code
-- **Y-axis convention** - HID standard: 0=up, 128=center, 255=down
+- **Y-axis convention** - All input drivers MUST normalize to HID standard: 0=up, 128=center, 255=down
+  - Sony/Xbox/8BitDo controllers: Native HID, no inversion needed
+  - Nintendo controllers: Invert Y (Nintendo uses 0=down, 255=up)
+  - Native GC/N64: Invert Y when reading
 
 ## External Dependencies
 
