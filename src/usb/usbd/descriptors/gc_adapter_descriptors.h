@@ -119,14 +119,14 @@ static const uint8_t gc_adapter_report_descriptor[] = {
     0x09, 0x00,        // Usage (Undefined - vendor specific)
     0xA1, 0x01,        // Collection (Application)
 
-    // Report ID 0x11: Rumble Output (5 bytes: report_id + 4 data)
+    // Report ID 0x11: Rumble Output (4 bytes data, one per port)
     0x85, 0x11,        //   Report ID (17)
     0x19, 0x00,        //   Usage Minimum (0)
     0x2A, 0xFF, 0x00,  //   Usage Maximum (255)
     0x15, 0x00,        //   Logical Minimum (0)
     0x26, 0xFF, 0x00,  //   Logical Maximum (255)
     0x75, 0x08,        //   Report Size (8)
-    0x95, 0x05,        //   Report Count (5) - includes report ID byte in HID spec
+    0x95, 0x04,        //   Report Count (4) - 4 bytes for 4 ports
     0x91, 0x00,        //   Output (Data, Array, Absolute)
     0xC0,              // End Collection
 
@@ -187,9 +187,10 @@ static const uint8_t gc_adapter_config_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, GC_ADAPTER_CONFIG_TOTAL_LEN, 0x80, 500),  // 500mA
 
     // Interface + HID + Endpoints (using TinyUSB HID INOUT macro)
+    // Macro order: _epout, _epin (OUT first, then IN)
     TUD_HID_INOUT_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE,
                              sizeof(gc_adapter_report_descriptor),
-                             0x81, 0x02, 37, 1),  // EP IN 0x81, EP OUT 0x02, 37 bytes, 1ms
+                             0x02, 0x81, 37, 1),  // EP OUT 0x02, EP IN 0x81, 37 bytes, 1ms
 };
 
 // String descriptors

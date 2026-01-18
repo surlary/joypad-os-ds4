@@ -690,7 +690,11 @@ pico_generate_pio_header(joypad_n642usb ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio
 
 # --- GC2USB (GameCube -> USB HID) ---
 add_executable(joypad_gc2usb)
-target_compile_definitions(joypad_gc2usb PRIVATE CONFIG_GC2USB=1 CONFIG_USB=1 DISABLE_USB_HOST=1 GC_PIN_DATA=29)
+target_compile_definitions(joypad_gc2usb PRIVATE CONFIG_GC2USB=1 CONFIG_USB=1 DISABLE_USB_HOST=1 GC_PIN_DATA=29
+    PICO_DEFAULT_UART=0
+    PICO_DEFAULT_UART_TX_PIN=12
+    PICO_DEFAULT_UART_RX_PIN=13
+)
 target_sources(joypad_gc2usb PUBLIC ${CORE_SOURCES} ${USB_DEVICE_SOURCES}
     ${GC_HOST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/gc2usb/app.c

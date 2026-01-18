@@ -14,6 +14,7 @@
 #include "../usbd.h"
 #include "descriptors/gc_adapter_descriptors.h"
 #include "core/buttons.h"
+#include "core/output_interface.h"
 #include <string.h>
 
 // ============================================================================
@@ -107,6 +108,13 @@ static bool gc_adapter_mode_send_report(uint8_t player_index,
 
 static void gc_adapter_mode_handle_output(uint8_t report_id, const uint8_t* data, uint16_t len)
 {
+    // TinyUSB may pass report_id=0 with report ID as first byte of data
+    if (report_id == 0 && len > 0) {
+        report_id = data[0];
+        data++;
+        len--;
+    }
+
     // Rumble output - Report ID 0x11 (4 bytes: one per port)
     if (report_id == GC_ADAPTER_REPORT_ID_RUMBLE && len >= 4) {
         gc_adapter_rumble.report_id = GC_ADAPTER_REPORT_ID_RUMBLE;
@@ -129,6 +137,36 @@ static uint8_t gc_adapter_mode_get_rumble(void)
         if (gc_adapter_rumble.rumble[i]) return 0xFF;
     }
     return 0;
+}
+
+// Get per-port rumble for a specific player/port
+uint8_t gc_adapter_mode_get_port_rumble(uint8_t port)
+{
+    if (port >= 4) return 0;
+    return gc_adapter_rumble.rumble[port] ? 0xFF : 0;
+}
+
+static bool gc_adapter_mode_get_feedback(output_feedback_t* fb)
+{
+    if (!fb) return false;
+
+    // GC Adapter has binary rumble per port
+    // For the simple interface, combine all ports
+    uint8_t rumble = 0;
+    for (int i = 0; i < 4; i++) {
+        if (gc_adapter_rumble.rumble[i]) {
+            rumble = 0xFF;
+            break;
+        }
+    }
+
+    fb->rumble_left = rumble;
+    fb->rumble_right = rumble;
+    fb->led_player = 0;
+    fb->led_r = fb->led_g = fb->led_b = 0;
+    fb->dirty = gc_adapter_rumble_available;
+
+    return gc_adapter_rumble_available;
 }
 
 static const uint8_t* gc_adapter_mode_get_device_descriptor(void)
@@ -164,7 +202,7 @@ const usbd_mode_t gc_adapter_mode = {
 
     .handle_output = gc_adapter_mode_handle_output,
     .get_rumble = gc_adapter_mode_get_rumble,
-    .get_feedback = NULL,
+    .get_feedback = gc_adapter_mode_get_feedback,
     .get_report = NULL,
 
     .get_class_driver = NULL,  // Uses built-in HID class driver

@@ -96,9 +96,11 @@ void app_task(void)
 {
     // Forward rumble from USB host to GC controller via feedback system
     // USB device receives rumble from host PC, GC controller reads from feedback
-    feedback_state_t* fb = feedback_get_state(0);
-    if (fb && fb->rumble_dirty) {
-        // GC host will pick this up in its task via feedback_get_state()
-        // Nothing extra needed here - gc_host_task handles it
+    if (usbd_output_interface.get_feedback) {
+        output_feedback_t fb;
+        if (usbd_output_interface.get_feedback(&fb) && fb.dirty) {
+            // Set rumble for player 0 (GC controller)
+            feedback_set_rumble(0, fb.rumble_left, fb.rumble_right);
+        }
     }
 }

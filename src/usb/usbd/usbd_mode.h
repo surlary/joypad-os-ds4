@@ -92,6 +92,8 @@ extern const usbd_mode_t kbmouse_mode;
 bool kbmouse_mode_send_idle_mouse(void);
 #if CFG_TUD_GC_ADAPTER
 extern const usbd_mode_t gc_adapter_mode;
+// Get per-port rumble (for multi-controller GC Adapter mode)
+uint8_t gc_adapter_mode_get_port_rumble(uint8_t port);
 #endif
 
 #endif // USBD_MODE_H

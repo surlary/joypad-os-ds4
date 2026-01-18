@@ -1185,6 +1185,17 @@ static bool usbd_get_feedback(output_feedback_t* fb)
             return false;
         }
 
+#if CFG_TUD_GC_ADAPTER
+        case USB_OUTPUT_MODE_GC_ADAPTER: {
+            // GC Adapter: delegate to mode interface
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_GC_ADAPTER];
+            if (mode && mode->get_feedback) {
+                return mode->get_feedback(fb);
+            }
+            return false;
+        }
+#endif
+
         default:
             return false;
     }
