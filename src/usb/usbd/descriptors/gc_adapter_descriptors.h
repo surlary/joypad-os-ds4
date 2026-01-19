@@ -33,15 +33,19 @@
 #define GC_ADAPTER_REPORT_ID_INIT    0x13  // Init command from host (1 byte)
 #define GC_ADAPTER_REPORT_ID_INPUT   0x21  // Controller input report (37 bytes)
 
-// Port connection status (upper nibble of first byte per port)
-#define GC_ADAPTER_PORT_NONE         0x00  // No controller
-#define GC_ADAPTER_PORT_WIRED        0x10  // Wired controller
-#define GC_ADAPTER_PORT_WIRELESS     0x20  // Wireless controller
+// Port status byte (bitmask, not nibbles!)
+// Based on HOJA's working implementation:
+// - Bit 2 (0x04): Gray USB connected (both USBs plugged in)
+// - Bit 4 (0x10): Controller connected to this port
+#define GC_ADAPTER_STATUS_NONE          0x00  // No USB, no controller
+#define GC_ADAPTER_STATUS_USB_ONLY      0x04  // Gray USB mode, no controller
+#define GC_ADAPTER_STATUS_CONNECTED     0x14  // Gray USB + controller connected
 
-// Controller type (lower nibble of first byte per port)
-#define GC_ADAPTER_TYPE_NONE         0x00  // No controller
-#define GC_ADAPTER_TYPE_NORMAL       0x01  // Standard controller
-#define GC_ADAPTER_TYPE_WAVEBIRD     0x02  // WaveBird (wireless)
+// Legacy defines (kept for compatibility but not used in new format)
+#define GC_ADAPTER_PORT_NONE         0x00
+#define GC_ADAPTER_PORT_WIRED        0x10
+#define GC_ADAPTER_TYPE_NONE         0x00
+#define GC_ADAPTER_TYPE_NORMAL       0x01
 
 // Report sizes (excluding report ID)
 #define GC_ADAPTER_INPUT_SIZE        37    // 1 byte report_id + 36 bytes data
@@ -112,46 +116,60 @@ _Static_assert(sizeof(gc_adapter_out_report_t) == 5, "gc_adapter_out_report_t mu
 // GC ADAPTER HID REPORT DESCRIPTOR
 // ============================================================================
 
-// HID Report Descriptor matching the real WUP-028 adapter
-// Based on USB capture: Uses Gaming Controls usage page with vendor-specific reports
+// HID Report Descriptor for GC Adapter - Matches HOJA's working descriptor exactly
 static const uint8_t gc_adapter_report_descriptor[] = {
-    0x05, 0x05,        // Usage Page (Gaming Controls)
-    0x09, 0x00,        // Usage (Undefined - vendor specific)
+    0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+    0x09, 0x05,        // Usage (Game Pad)
     0xA1, 0x01,        // Collection (Application)
-
-    // Report ID 0x11: Rumble Output (4 bytes data, one per port)
-    0x85, 0x11,        //   Report ID (17)
-    0x19, 0x00,        //   Usage Minimum (0)
-    0x2A, 0xFF, 0x00,  //   Usage Maximum (255)
-    0x15, 0x00,        //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,  //   Logical Maximum (255)
-    0x75, 0x08,        //   Report Size (8)
-    0x95, 0x04,        //   Report Count (4) - 4 bytes for 4 ports
-    0x91, 0x00,        //   Output (Data, Array, Absolute)
-    0xC0,              // End Collection
-
-    0xA1, 0x01,        // Collection (Application)
-    // Report ID 0x21: Controller Input (37 bytes: report_id + 36 data)
-    0x85, 0x21,        //   Report ID (33)
-    0x19, 0x00,        //   Usage Minimum (0)
-    0x2A, 0xFF, 0x00,  //   Usage Maximum (255)
-    0x15, 0x00,        //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,  //   Logical Maximum (255)
-    0x75, 0x08,        //   Report Size (8)
-    0x95, 0x25,        //   Report Count (37) - per real adapter (reports 37, sends 36+ID)
-    0x81, 0x00,        //   Input (Data, Array, Absolute)
-    0xC0,              // End Collection
-
-    0xA1, 0x01,        // Collection (Application)
-    // Report ID 0x13: Init Command Output (1 byte: just report_id)
-    0x85, 0x13,        //   Report ID (19)
-    0x19, 0x00,        //   Usage Minimum (0)
-    0x2A, 0xFF, 0x00,  //   Usage Maximum (255)
-    0x15, 0x00,        //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,  //   Logical Maximum (255)
-    0x75, 0x08,        //   Report Size (8)
-    0x95, 0x01,        //   Report Count (1)
-    0x91, 0x00,        //   Output (Data, Array, Absolute)
+    0xA1, 0x03,        //   Collection (Report)
+    0x85, 0x11,        //     Report ID (17) - Rumble output
+    0x19, 0x00,        //     Usage Minimum (Undefined)
+    0x2A, 0xFF, 0x00,  //     Usage Maximum (0xFF)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x26, 0xFF, 0x00,  //     Logical Maximum (255)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x05,        //     Report Count (5)
+    0x91, 0x00,        //     Output (Data,Array,Abs)
+    0xC0,              //   End Collection
+    0xA1, 0x03,        //   Collection (Report)
+    0x85, 0x21,        //     Report ID (33) - Input report
+    0x05, 0x00,        //     Usage Page (Undefined)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x25, 0xFF,        //     Logical Maximum (-1)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
+    0x05, 0x09,        //     Usage Page (Button)
+    0x19, 0x01,        //     Usage Minimum (0x01)
+    0x29, 0x08,        //     Usage Maximum (0x08)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x25, 0x01,        //     Logical Maximum (1)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x02,        //     Report Count (2)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
+    0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
+    0x09, 0x30,        //     Usage (X)
+    0x09, 0x31,        //     Usage (Y)
+    0x09, 0x32,        //     Usage (Z)
+    0x09, 0x33,        //     Usage (Rx)
+    0x09, 0x34,        //     Usage (Ry)
+    0x09, 0x35,        //     Usage (Rz)
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x06,        //     Report Count (6)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
+    0xC0,              //   End Collection
+    0xA1, 0x03,        //   Collection (Report)
+    0x85, 0x13,        //     Report ID (19) - Init command
+    0x19, 0x00,        //     Usage Minimum (Undefined)
+    0x2A, 0xFF, 0x00,  //     Usage Maximum (0xFF)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x26, 0xFF, 0x00,  //     Logical Maximum (255)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
+    0x91, 0x00,        //     Output (Data,Array,Abs)
+    0xC0,              //   End Collection
     0xC0,              // End Collection
 };
 
@@ -179,18 +197,25 @@ static const tusb_desc_device_t gc_adapter_device_descriptor = {
 
 // Configuration descriptor length
 // Config (9) + Interface (9) + HID (9) + EP IN (7) + EP OUT (7) = 41
-#define GC_ADAPTER_CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
+#define GC_ADAPTER_CONFIG_TOTAL_LEN  41
 
 // Configuration descriptor - HID with IN and OUT endpoints
+// Match HOJA's endpoint addresses and sizes: EP IN 0x82 (37 bytes), EP OUT 0x01 (6 bytes)
 static const uint8_t gc_adapter_config_descriptor[] = {
     // Configuration descriptor (9 bytes)
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, GC_ADAPTER_CONFIG_TOTAL_LEN, 0x80, 500),  // 500mA
+    TUD_CONFIG_DESCRIPTOR(1, 1, 0, GC_ADAPTER_CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_SELF_POWERED, 500),  // 500mA
 
-    // Interface + HID + Endpoints (using TinyUSB HID INOUT macro)
-    // Macro order: _epout, _epin (OUT first, then IN)
-    TUD_HID_INOUT_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE,
-                             sizeof(gc_adapter_report_descriptor),
-                             0x02, 0x81, 37, 1),  // EP OUT 0x02, EP IN 0x81, 37 bytes, 1ms
+    // Interface descriptor (9 bytes)
+    9, TUSB_DESC_INTERFACE, 0x00, 0x00, 0x02, TUSB_CLASS_HID, 0x00, 0x00, 0x00,
+
+    // HID descriptor (9 bytes)
+    9, HID_DESC_TYPE_HID, U16_TO_U8S_LE(0x0110), 0, 1, HID_DESC_TYPE_REPORT, U16_TO_U8S_LE(sizeof(gc_adapter_report_descriptor)),
+
+    // Endpoint IN descriptor (7 bytes) - 37 bytes for input report
+    7, TUSB_DESC_ENDPOINT, 0x82, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(37), 1,
+
+    // Endpoint OUT descriptor (7 bytes) - 6 bytes for rumble (matches HOJA)
+    7, TUSB_DESC_ENDPOINT, 0x01, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(6), 1,
 };
 
 // String descriptors

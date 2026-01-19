@@ -738,8 +738,11 @@ void usbd_task(void)
         case USB_OUTPUT_MODE_GC_ADAPTER: {
             // GC Adapter mode: delegate to mode interface
             const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_GC_ADAPTER];
-            if (mode && mode->is_ready && mode->is_ready()) {
-                usbd_send_report(0);
+            if (mode) {
+                if (mode->task) mode->task();
+                if (mode->is_ready && mode->is_ready()) {
+                    usbd_send_report(0);
+                }
             }
             break;
         }
@@ -1692,7 +1695,17 @@ usbd_class_driver_t const* usbd_app_driver_get_cb(uint8_t* driver_count)
             return NULL;
         }
 
-        // GC_ADAPTER uses built-in HID class driver, no custom driver needed
+#if CFG_TUD_GC_ADAPTER
+        case USB_OUTPUT_MODE_GC_ADAPTER: {
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_GC_ADAPTER];
+            if (mode && mode->get_class_driver) {
+                *driver_count = 1;
+                return mode->get_class_driver();
+            }
+            *driver_count = 0;
+            return NULL;
+        }
+#endif
 
         default:
             // HID/Switch modes use built-in HID class driver

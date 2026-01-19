@@ -100,6 +100,7 @@ void app_task(void)
         output_feedback_t fb;
         if (usbd_output_interface.get_feedback(&fb) && fb.dirty) {
             // Set rumble for player 0 (GC controller)
+            // Pass actual values so both on AND off commands are applied
             feedback_set_rumble(0, fb.rumble_left, fb.rumble_right);
         }
     }

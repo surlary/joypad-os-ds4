@@ -953,6 +953,10 @@ void profile_apply(const profile_t* profile,
     // Note: active-high (bit set = pressed)
     if (!output->l2_analog_override) {
         switch (profile->l2_behavior) {
+            case TRIGGER_DISABLED:
+                output->l2_analog = 0;
+                output->buttons &= ~JP_BUTTON_L2;  // Clear digital too
+                break;
             case TRIGGER_DIGITAL_ONLY:
                 output->l2_analog = 0;
                 break;
@@ -966,6 +970,10 @@ void profile_apply(const profile_t* profile,
                     output->l2_analog = profile->l2_analog_value;
                 }
                 break;
+            case TRIGGER_INSTANT:
+                // Analog zeroed, digital handled by threshold logic elsewhere
+                output->l2_analog = 0;
+                break;
             case TRIGGER_PASSTHROUGH:
             default:
                 // Already set above
@@ -975,6 +983,10 @@ void profile_apply(const profile_t* profile,
 
     if (!output->r2_analog_override) {
         switch (profile->r2_behavior) {
+            case TRIGGER_DISABLED:
+                output->r2_analog = 0;
+                output->buttons &= ~JP_BUTTON_R2;  // Clear digital too
+                break;
             case TRIGGER_DIGITAL_ONLY:
                 output->r2_analog = 0;
                 break;
@@ -987,6 +999,10 @@ void profile_apply(const profile_t* profile,
                 if (input_buttons & JP_BUTTON_R2) {
                     output->r2_analog = profile->r2_analog_value;
                 }
+                break;
+            case TRIGGER_INSTANT:
+                // Analog zeroed, digital handled by threshold logic elsewhere
+                output->r2_analog = 0;
                 break;
             case TRIGGER_PASSTHROUGH:
             default:

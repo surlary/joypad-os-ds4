@@ -55,7 +55,10 @@ static const char* gc_get_profile_name(uint8_t index) {
 
 static uint8_t gc_get_trigger_threshold(void) {
     const profile_t* profile = profile_get_active(OUTPUT_TARGET_GAMECUBE);
-    return profile ? profile->l2_threshold : 128;
+    if (!profile || !profile->adaptive_triggers) {
+        return 0;  // Disabled or no profile
+    }
+    return profile->l2_threshold;
 }
 
 // ============================================================================
