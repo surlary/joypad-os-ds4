@@ -873,6 +873,8 @@ void profile_apply(const profile_t* profile,
     }
 
     // Build output button state (active-high: 1 = pressed, 0 = released)
+    // Use output->buttons which includes threshold-based L2/R2 for XInput
+    uint32_t buttons_with_triggers = output->buttons;
     uint32_t output_buttons = 0;
     uint32_t mapped_inputs = 0;
 
@@ -880,8 +882,8 @@ void profile_apply(const profile_t* profile,
     for (uint8_t i = 0; i < profile->button_map_count; i++) {
         const button_map_entry_t* entry = &profile->button_map[i];
 
-        // Check if input button is pressed (active-high: pressed = bit set)
-        bool pressed = ((input_buttons & entry->input) != 0);
+        // Check if input button is pressed (includes threshold-based L2/R2)
+        bool pressed = ((buttons_with_triggers & entry->input) != 0);
 
         if (pressed) {
             // Set output button(s)
@@ -899,7 +901,7 @@ void profile_apply(const profile_t* profile,
 
     // Passthrough unmapped buttons (active-high)
     uint32_t unmapped_inputs = ~mapped_inputs;
-    uint32_t pressed_unmapped = input_buttons & unmapped_inputs;
+    uint32_t pressed_unmapped = buttons_with_triggers & unmapped_inputs;
     output_buttons |= pressed_unmapped;
 
     // Output is active-high
@@ -980,6 +982,7 @@ void profile_apply(const profile_t* profile,
             case TRIGGER_LIGHT_PRESS:
                 if (output->buttons & JP_BUTTON_L2) {
                     output->l2_analog = profile->l2_analog_value;
+                    output->buttons &= ~JP_BUTTON_L2;  // Analog only, no digital
                 }
                 break;
             case TRIGGER_INSTANT:
@@ -1010,6 +1013,7 @@ void profile_apply(const profile_t* profile,
             case TRIGGER_LIGHT_PRESS:
                 if (output->buttons & JP_BUTTON_R2) {
                     output->r2_analog = profile->r2_analog_value;
+                    output->buttons &= ~JP_BUTTON_R2;  // Analog only, no digital
                 }
                 break;
             case TRIGGER_INSTANT:
