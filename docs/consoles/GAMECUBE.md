@@ -61,10 +61,10 @@ Standard mapping for most games:
 
 | USB Input | GameCube Output |
 |-----------|-----------------|
-| B1 (Cross/B) | B |
-| B2 (Circle/A) | A |
-| B3 (Square/Y) | Y |
-| B4 (Triangle/X) | X |
+| B1 (Cross/A) | B |
+| B2 (Circle/B) | A |
+| B3 (Square/X) | Y |
+| B4 (Triangle/Y) | X |
 | L1 (LB/L) | - (disabled) |
 | R1 (RB/R) | Z |
 | L2 (LT/ZL) | L (analog) |
@@ -92,10 +92,10 @@ Super Smash Bros. Melee competitive mapping:
 
 | USB Input | GameCube Output | Notes |
 |-----------|-----------------|-------|
-| B1 (Cross/B) | B | Attack |
-| B2 (Circle/A) | A | Jump |
-| B3 (Square/Y) | Y | Jump |
-| B4 (Triangle/X) | X | Jump |
+| B1 (Cross/A) | B | Attack |
+| B2 (Circle/B) | A | Jump |
+| B3 (Square/X) | Y | Jump |
+| B4 (Triangle/Y) | X | Jump |
 | L1 (LB) | Z | Grab |
 | R1 (RB) | X | Short hop aerial |
 | L2 (LT @ 88%) | L (17% analog) | Light shield |
