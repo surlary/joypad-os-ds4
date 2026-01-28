@@ -39,6 +39,7 @@ static uint32_t pairing_start_ms = 0;
 static struct udp_pcb* udp_pcb = NULL;
 static struct tcp_pcb* tcp_listen_pcb = NULL;
 static char ap_ssid[32];
+static char ap_password[32];  // Derived from SSID suffix
 static char ap_ip_str[16];
 
 // DHCP server state
@@ -93,12 +94,19 @@ bool wifi_transport_init(const wifi_transport_config_t* cfg)
              config.ssid_prefix,
              board_id.id[6], board_id.id[7]);
 
+    // Derive password from SSID suffix (repeat suffix twice)
+    // SSID: JOYPAD-A7B3 -> Password: A7B3A7B3
+    // This allows iOS app to compute password from discovered SSID
+    snprintf(ap_password, sizeof(ap_password), "%02X%02X%02X%02X",
+             board_id.id[6], board_id.id[7],
+             board_id.id[6], board_id.id[7]);
+
     printf("[wifi] Starting AP: %s\n", ap_ssid);
-    printf("[wifi] Password: %s\n", config.password);
+    printf("[wifi] Password: %s\n", ap_password);
     printf("[wifi] Channel: %d\n", config.channel);
 
     // Enable AP mode
-    cyw43_arch_enable_ap_mode(ap_ssid, config.password, CYW43_AUTH_WPA2_AES_PSK);
+    cyw43_arch_enable_ap_mode(ap_ssid, ap_password, CYW43_AUTH_WPA2_AES_PSK);
 
     // Configure static IP for AP (192.168.4.1)
     ip4_addr_t gw, mask;
@@ -473,4 +481,14 @@ int wifi_transport_send_tcp(uint32_t client_id, const uint8_t* data, uint16_t le
 
     tcp_output(pcb);
     return len;
+}
+
+int wifi_transport_find_tcp_client_by_ip(uint32_t ip)
+{
+    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+        if (tcp_clients[i].connected && tcp_clients[i].ip == ip) {
+            return i;
+        }
+    }
+    return -1;
 }

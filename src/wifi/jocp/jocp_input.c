@@ -290,14 +290,33 @@ void jocp_send_feedback_all(const output_feedback_t* fb)
     }
 }
 
+// Track last feedback time per controller for rate limiting
+static uint32_t last_feedback_ms[MAX_CONTROLLERS] = {0};
+#define FEEDBACK_INTERVAL_MS 50  // Send feedback at most every 50ms
+
 void jocp_send_feedback(uint8_t controller_id, const output_feedback_t* fb)
 {
     if (controller_id >= MAX_CONTROLLERS) return;
     if (!controllers[controller_id].active) return;
     if (!fb) return;
 
+    // Rate limit feedback to avoid overwhelming the TCP connection
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - last_feedback_ms[controller_id] < FEEDBACK_INTERVAL_MS) {
+        return;
+    }
+    last_feedback_ms[controller_id] = now;
+
+    // Find TCP client for this controller (output commands go over TCP)
+    int tcp_client = wifi_transport_find_tcp_client_by_ip(controllers[controller_id].ip);
+    if (tcp_client < 0) {
+        // No TCP connection from this controller, skip feedback
+        return;
+    }
+
     // Build OUTPUT_CMD packet for rumble
-    if (fb->rumble_left > 0 || fb->rumble_right > 0) {
+    // Always send when feedback is dirty (includes rumble=0 to stop)
+    {
         uint8_t packet[32];
         jocp_header_t* header = (jocp_header_t*)packet;
 
@@ -320,11 +339,34 @@ void jocp_send_feedback(uint8_t controller_id, const output_feedback_t* fb)
 
         uint16_t len = sizeof(jocp_header_t) + 1 + sizeof(jocp_rumble_cmd_t);
 
-        // Send via UDP (faster than TCP for haptics)
-        wifi_transport_send_udp(controllers[controller_id].ip,
-                                controllers[controller_id].port,
-                                packet, len);
+        printf("[jocp] Sending rumble via TCP: L=%d R=%d\n", fb->rumble_left, fb->rumble_right);
+
+        wifi_transport_send_tcp(tcp_client, packet, len);
     }
 
-    // TODO: Send RGB LED and player LED commands
+    // Send RGB LED command if any color is set
+    if (fb->led_r > 0 || fb->led_g > 0 || fb->led_b > 0) {
+        uint8_t packet[32];
+        jocp_header_t* header = (jocp_header_t*)packet;
+
+        header->magic = JOCP_MAGIC;
+        header->version = JOCP_VERSION;
+        header->msg_type = JOCP_MSG_OUTPUT_CMD;
+        header->seq = 0;
+        header->flags = 0;
+        header->timestamp_us = time_us_32();
+
+        uint8_t* cmd = packet + sizeof(jocp_header_t);
+        cmd[0] = JOCP_CMD_RGB_LED;
+        jocp_rgb_led_cmd_t* rgb = (jocp_rgb_led_cmd_t*)(cmd + 1);
+        rgb->r = fb->led_r;
+        rgb->g = fb->led_g;
+        rgb->b = fb->led_b;
+
+        uint16_t len = sizeof(jocp_header_t) + 1 + sizeof(jocp_rgb_led_cmd_t);
+
+        printf("[jocp] Sending RGB LED via TCP: R=%d G=%d B=%d\n", fb->led_r, fb->led_g, fb->led_b);
+
+        wifi_transport_send_tcp(tcp_client, packet, len);
+    }
 }

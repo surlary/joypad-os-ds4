@@ -138,11 +138,23 @@ typedef struct __attribute__((packed)) {
 
 // HID Report Descriptor for SInput
 // Input: 64 bytes (Report ID 0x01)
+// Feature Response: 12 bytes (Report ID 0x02)
 // Output: 48 bytes (Report ID 0x03)
 static const uint8_t sinput_report_descriptor[] = {
     0x05, 0x01,        // Usage Page (Generic Desktop)
     0x09, 0x05,        // Usage (Game Pad)
     0xA1, 0x01,        // Collection (Application)
+
+    // === Feature Response Report (12 bytes) ===
+    // Sent as Input report in response to feature request command
+    0x85, SINPUT_REPORT_ID_FEATURES,  // Report ID (2)
+    0x06, 0x00, 0xFF,  //   Usage Page (Vendor Defined)
+    0x09, 0x05,        //   Usage (Vendor Usage 5) - Feature Response
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+    0x75, 0x08,        //   Report Size (8)
+    0x95, 0x0C,        //   Report Count (12)
+    0x81, 0x02,        //   Input (Data,Var,Abs)
 
     // === Input Report (64 bytes) ===
     0x85, SINPUT_REPORT_ID_INPUT,  // Report ID (1)

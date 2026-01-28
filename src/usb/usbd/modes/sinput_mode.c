@@ -19,6 +19,12 @@
 static sinput_report_t sinput_report;
 static uint8_t rumble_left = 0;
 static uint8_t rumble_right = 0;
+static bool rumble_dirty = false;  // Only send feedback when changed
+static uint8_t rgb_r = 0;
+static uint8_t rgb_g = 0;
+static uint8_t rgb_b = 0;
+static bool rgb_dirty = false;
+static bool feature_request_pending = false;
 
 // ============================================================================
 // CONVERSION HELPERS
@@ -149,12 +155,27 @@ static bool sinput_mode_send_report(uint8_t player_index,
 
 static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, uint16_t len)
 {
+    printf("[sinput] handle_output: report_id=%d len=%d data[0]=%d\n", report_id, len, data[0]);
+
+    // Handle report ID in buffer (interrupt OUT endpoint case)
+    // When report_id=0, the actual report ID may be the first byte of data
+    if (report_id == 0 && len > 0 && data[0] == SINPUT_REPORT_ID_OUTPUT) {
+        // Report ID is in buffer, skip it
+        report_id = data[0];
+        data = data + 1;
+        len = len - 1;
+        printf("[sinput] Extracted report_id from buffer: %d\n", report_id);
+    }
+
     // Handle output report (rumble, LEDs)
     if (report_id != SINPUT_REPORT_ID_OUTPUT || len < 2) {
+        printf("[sinput] Ignoring: expected report_id=%d\n", SINPUT_REPORT_ID_OUTPUT);
         return;
     }
 
     uint8_t command = data[0];
+    printf("[sinput] command=%d data=[%d,%d,%d,%d,%d,%d]\n",
+           command, data[0], data[1], data[2], data[3], data[4], data[5]);
 
     switch (command) {
         case SINPUT_CMD_HAPTIC:
@@ -165,8 +186,15 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
             // data[4] = right amplitude
             // data[5] = right brake
             if (len >= 6 && data[1] == 2) {
-                rumble_left = data[2];
-                rumble_right = data[4];
+                uint8_t new_left = data[2];
+                uint8_t new_right = data[4];
+                // Only mark dirty if values actually changed
+                if (new_left != rumble_left || new_right != rumble_right) {
+                    rumble_left = new_left;
+                    rumble_right = new_right;
+                    rumble_dirty = true;
+                    printf("[sinput] Rumble changed: L=%d R=%d\n", rumble_left, rumble_right);
+                }
             }
             break;
 
@@ -175,9 +203,23 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
             // data[1] = player index (1-4)
             break;
 
+        case SINPUT_CMD_FEATURES:
+            // Feature request - queue a response
+            printf("[sinput] Feature request received\n");
+            feature_request_pending = true;
+            break;
+
         case SINPUT_CMD_RGB_LED:
-            // RGB LED command - not implemented yet
-            // data[1] = R, data[2] = G, data[3] = B
+            // RGB LED command: data[1] = R, data[2] = G, data[3] = B
+            if (len >= 4) {
+                if (data[1] != rgb_r || data[2] != rgb_g || data[3] != rgb_b) {
+                    rgb_r = data[1];
+                    rgb_g = data[2];
+                    rgb_b = data[3];
+                    rgb_dirty = true;
+                    printf("[sinput] RGB LED changed: R=%d G=%d B=%d\n", rgb_r, rgb_g, rgb_b);
+                }
+            }
             break;
 
         default:
@@ -194,14 +236,17 @@ static uint8_t sinput_mode_get_rumble(void)
 static bool sinput_mode_get_feedback(output_feedback_t* fb)
 {
     if (!fb) return false;
-    if (rumble_left == 0 && rumble_right == 0) return false;
+    if (!rumble_dirty && !rgb_dirty) return false;  // Only send when changed
 
     fb->rumble_left = rumble_left;
     fb->rumble_right = rumble_right;
-    fb->led_r = 0;
-    fb->led_g = 0;
-    fb->led_b = 0;
+    fb->led_r = rgb_r;
+    fb->led_g = rgb_g;
+    fb->led_b = rgb_b;
     fb->dirty = true;
+
+    rumble_dirty = false;
+    rgb_dirty = false;
 
     return true;
 }
@@ -219,6 +264,56 @@ static const uint8_t* sinput_mode_get_config_descriptor(void)
 static const uint8_t* sinput_mode_get_report_descriptor(void)
 {
     return sinput_report_descriptor;
+}
+
+// Send feature response when pending
+static void sinput_mode_task(void)
+{
+    if (!feature_request_pending) return;
+    if (!tud_hid_ready()) return;
+
+    feature_request_pending = false;
+
+    // Build feature response (12 bytes)
+    // Format per SInput spec:
+    // Bytes 0-1: Protocol version (uint16 LE)
+    // Byte 2: Capability flags 1 (bit 0=rumble, bit 1=player LED, bit 2=accel, bit 3=gyro)
+    // Byte 3: Capability flags 2 (bit 1=RGB LED)
+    // Byte 4: Gamepad type (1=standard)
+    // Byte 5: Upper 3 bits=face style (1=Xbox), lower 5 bits=sub product
+    // Bytes 6-7: Polling rate micros (uint16 LE) - 8000us = 125Hz
+    // Bytes 8-9: Accel range (uint16 LE) - 0 = not supported
+    // Bytes 10-11: Gyro range (uint16 LE) - 0 = not supported
+    uint8_t feature_response[12] = {0};
+
+    // Protocol version 1.0
+    feature_response[0] = 0x00;
+    feature_response[1] = 0x01;
+
+    // Capability flags 1: rumble supported
+    feature_response[2] = 0x01;  // bit 0 = rumble
+
+    // Capability flags 2: RGB LED supported
+    feature_response[3] = 0x02;  // bit 1 = RGB LED
+
+    // Gamepad type: Standard (1)
+    feature_response[4] = 0x01;
+
+    // Face style: Xbox (1 << 5) | sub product (0)
+    feature_response[5] = (0x01 << 5);
+
+    // Polling rate: 8000 microseconds (125Hz)
+    feature_response[6] = 0x40;  // 8000 & 0xFF
+    feature_response[7] = 0x1F;  // 8000 >> 8
+
+    // Accel/Gyro ranges: 0 (not supported on adapter)
+    feature_response[8] = 0;
+    feature_response[9] = 0;
+    feature_response[10] = 0;
+    feature_response[11] = 0;
+
+    printf("[sinput] Sending feature response (RGB LED supported)\n");
+    tud_hid_report(SINPUT_REPORT_ID_FEATURES, feature_response, sizeof(feature_response));
 }
 
 // ============================================================================
@@ -242,5 +337,5 @@ const usbd_mode_t sinput_mode = {
     .get_feedback = sinput_mode_get_feedback,
     .get_report = NULL,
     .get_class_driver = NULL,
-    .task = NULL,
+    .task = sinput_mode_task,
 };

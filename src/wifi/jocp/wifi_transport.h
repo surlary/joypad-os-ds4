@@ -60,6 +60,10 @@ int wifi_transport_send_udp(uint32_t dest_ip, uint16_t dest_port,
 // Returns bytes sent, or -1 on error
 int wifi_transport_send_tcp(uint32_t client_id, const uint8_t* data, uint16_t len);
 
+// Find TCP client ID by IP address
+// Returns client_id (0-3), or -1 if not found
+int wifi_transport_find_tcp_client_by_ip(uint32_t ip);
+
 // ============================================================================
 // PAIRING MODE
 // ============================================================================
