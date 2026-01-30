@@ -433,9 +433,9 @@ static void cmd_profile_get(const char* json)
         snprintf(response_buf, sizeof(response_buf),
                  "{\"ok\":true,\"index\":%d,\"name\":\"%.11s\",\"builtin\":false,\"editable\":true,"
                  "\"button_map\":[%s],"
-                 "\"left_stick_sens\":%d,\"right_stick_sens\":%d,\"flags\":%d}",
+                 "\"left_stick_sens\":%d,\"right_stick_sens\":%d,\"flags\":%d,\"socd_mode\":%d}",
                  index, p->name, map_str,
-                 p->left_stick_sens, p->right_stick_sens, p->flags);
+                 p->left_stick_sens, p->right_stick_sens, p->flags, p->socd_mode);
     }
     send_json(response_buf);
 }
@@ -615,6 +615,14 @@ static void cmd_profile_save(const char* json)
     int flags;
     if (json_get_int(json, "flags", &flags)) {
         p->flags = (uint8_t)flags;
+    }
+
+    // Get SOCD mode
+    int socd;
+    if (json_get_int(json, "socd_mode", &socd)) {
+        p->socd_mode = (uint8_t)(socd > 3 ? 0 : (socd < 0 ? 0 : socd));
+    } else if (is_new) {
+        p->socd_mode = 0;  // Default to passthrough
     }
 
     // Save to flash (runtime settings are already updated)

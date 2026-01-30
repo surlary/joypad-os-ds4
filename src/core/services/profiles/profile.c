@@ -629,7 +629,7 @@ void profile_save_to_flash(output_target_t output)
 // Apply SOCD cleaning to D-pad buttons
 // player_index: for last-win state tracking (use 0 for legacy/single player)
 // Returns the cleaned button state
-static uint32_t apply_socd(uint32_t buttons, socd_mode_t mode, uint8_t player_index)
+uint32_t apply_socd(uint32_t buttons, socd_mode_t mode, uint8_t player_index)
 {
     if (mode == SOCD_PASSTHROUGH || player_index >= MAX_PLAYERS) {
         return buttons;

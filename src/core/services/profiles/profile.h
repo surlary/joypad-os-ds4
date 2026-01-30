@@ -415,4 +415,14 @@ uint32_t profile_apply_button_map(const profile_t* profile, uint32_t input_butto
     .socd_mode = SOCD_PASSTHROUGH, \
 }
 
+// ============================================================================
+// SOCD API (for use by custom profile path in usbd.c)
+// ============================================================================
+
+// Apply SOCD cleaning to D-pad buttons
+// mode: SOCD cleaning mode
+// player_index: for last-win state tracking (use 0 for legacy/single player)
+// Returns the cleaned button state
+uint32_t apply_socd(uint32_t buttons, socd_mode_t mode, uint8_t player_index);
+
 #endif // CORE_PROFILE_H

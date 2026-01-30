@@ -39,7 +39,8 @@ typedef struct {
     uint8_t left_stick_sens;   // 0-200 (100 = 1.0x, 50 = 0.5x, 200 = 2.0x)
     uint8_t right_stick_sens;  // 0-200
     uint8_t flags;             // Bit 0: swap sticks, Bit 1: invert LY, Bit 2: invert RY
-    uint8_t reserved[23];      // Future use
+    uint8_t socd_mode;         // SOCD cleaning mode (0=passthrough, 1=neutral, 2=up-priority, 3=last-win)
+    uint8_t reserved[22];      // Future use
 } custom_profile_t;
 
 // Profile flags

@@ -581,6 +581,7 @@ class JoypadConfigApp {
             this.rightStickSens.value = 100;
             document.getElementById('leftStickSensValue').textContent = '100%';
             document.getElementById('rightStickSensValue').textContent = '100%';
+            document.getElementById('socdModeSelect').value = '0';
             document.getElementById('flagSwapSticks').checked = false;
             document.getElementById('flagInvertLY').checked = false;
             document.getElementById('flagInvertRY').checked = false;
@@ -602,6 +603,9 @@ class JoypadConfigApp {
                 this.rightStickSens.value = profile.right_stick_sens || 100;
                 document.getElementById('leftStickSensValue').textContent = this.leftStickSens.value + '%';
                 document.getElementById('rightStickSensValue').textContent = this.rightStickSens.value + '%';
+
+                // Set SOCD mode
+                document.getElementById('socdModeSelect').value = (profile.socd_mode || 0).toString();
 
                 // Set flags
                 const flags = profile.flags || 0;
@@ -641,12 +645,16 @@ class JoypadConfigApp {
         if (document.getElementById('flagInvertLY').checked) flags |= PROFILE_FLAG_INVERT_LY;
         if (document.getElementById('flagInvertRY').checked) flags |= PROFILE_FLAG_INVERT_RY;
 
+        // Collect SOCD mode
+        const socdMode = parseInt(document.getElementById('socdModeSelect').value);
+
         const data = {
             name,
             button_map: buttonMap,
             left_stick_sens: parseInt(this.leftStickSens.value),
             right_stick_sens: parseInt(this.rightStickSens.value),
-            flags
+            flags,
+            socd_mode: socdMode
         };
 
         // Use unified PROFILE.SAVE API

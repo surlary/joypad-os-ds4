@@ -190,6 +190,12 @@ static uint32_t apply_usbd_profile(const input_event_t* event, profile_output_t*
                 profile_out->right_y = (uint8_t)(128 + (int16_t)(rel_y * sens));
             }
 
+            // Apply SOCD cleaning
+            if (custom->socd_mode > 0 && custom->socd_mode <= 3) {
+                profile_out->buttons = apply_socd(profile_out->buttons,
+                    (socd_mode_t)custom->socd_mode, 0);
+            }
+
             // Apply profile flags
             if (custom->flags & PROFILE_FLAG_SWAP_STICKS) {
                 uint8_t tmp_x = profile_out->left_x;

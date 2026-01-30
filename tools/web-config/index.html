@@ -659,6 +659,18 @@
                             </div>
                         </div>
                         <div class="form-group">
+                            <label>SOCD Cleaning</label>
+                            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+                                How to handle simultaneous opposite cardinal directions (e.g. Left+Right).
+                            </p>
+                            <select id="socdModeSelect" style="width: 100%;">
+                                <option value="0">Passthrough (no cleaning)</option>
+                                <option value="1">Neutral (cancel both directions)</option>
+                                <option value="2">Up Priority (U+D=U, L+R=neutral) — Hitbox style</option>
+                                <option value="3">Last Win (last input takes priority)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label>Options</label>
                             <div class="checkbox-row">
                                 <input type="checkbox" id="flagSwapSticks">
