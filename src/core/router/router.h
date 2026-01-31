@@ -94,7 +94,7 @@ typedef struct {
 // ROUTER CONFIGURATION
 // ============================================================================
 
-#define MAX_OUTPUTS 10
+#define MAX_OUTPUTS 12
 #define MAX_PLAYERS_PER_OUTPUT 8
 
 typedef struct {
