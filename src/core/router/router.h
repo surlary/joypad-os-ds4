@@ -57,6 +57,7 @@ typedef enum {
     OUTPUT_TARGET_USB_DEVICE,
     OUTPUT_TARGET_BLE_PERIPHERAL,
     OUTPUT_TARGET_UART,             // UART bridge to ESP32/other MCU
+    OUTPUT_TARGET_COUNT             // Must be last — used to size arrays
 } output_target_t;
 
 // ============================================================================
@@ -94,7 +95,7 @@ typedef struct {
 // ROUTER CONFIGURATION
 // ============================================================================
 
-#define MAX_OUTPUTS 12
+#define MAX_OUTPUTS OUTPUT_TARGET_COUNT
 #define MAX_PLAYERS_PER_OUTPUT 8
 
 typedef struct {
