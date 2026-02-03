@@ -1012,14 +1012,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             uint8_t minor_class = (cod >> 2) & 0x3F;
             bool is_gamepad = (major_class == 0x05) && ((minor_class & 0x0F) == 0x02);  // Gamepad
             bool is_joystick = (major_class == 0x05) && ((minor_class & 0x0F) == 0x01); // Joystick
-            // Wiimote/Wii U Pro: Peripheral (0x05) + pointing device flag (0x04 or 0x08 in minor class bits 2-3)
-            bool is_wiimote = ((cod >> 16) == 0x00) &&
-                              (major_class == 0x05) &&
-                              ((cod & 0x0C) != 0);
-            // Also check name for Wiimote
-            if (name[0] && strstr(name, "Nintendo RVL") != NULL) {
-                is_wiimote = true;
-            }
+            // Wiimote/Wii U Pro: detect by name only to avoid false-matching
+            // DualSense, DS4, DS3 and other gamepads that share Peripheral COD bits
+            bool is_wiimote = (name[0] && strstr(name, "Nintendo RVL") != NULL);
 
             // Log all inquiry results for debugging (gamepads highlighted)
             const char* type_str = "";
@@ -1134,12 +1129,11 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             printf("[BTSTACK_HOST] Incoming connection: %02X:%02X:%02X:%02X:%02X:%02X COD=0x%06X link=%d\n",
                    addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], (unsigned)cod, link_type);
 
-            // Check if this is a Wiimote by COD (before we know the name)
-            bool is_wiimote = ((cod >> 16) == 0x00) &&
-                              (((cod >> 8) & 0x1F) == 0x05) &&
-                              ((cod & 0x0C) != 0);
-
             // Save pending connection info for use when HID connection is established
+            // Note: device name is not available yet at CONNECTION_REQUEST time.
+            // Wiimote detection is deferred to CONNECTION_COMPLETE or later when
+            // name resolution completes. Global master role policy (set at startup)
+            // already ensures we become master for all connections.
             memcpy(classic_state.pending_addr, addr, 6);
             classic_state.pending_cod = cod;
             classic_state.pending_name[0] = '\0';  // Clear, will be filled by remote name request
@@ -1147,12 +1141,6 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             classic_state.pending_pid = 0;
             classic_state.pending_valid = true;
             classic_state.pending_outgoing = false;  // Device initiated this connection
-
-            if (is_wiimote && link_type == 0x01) {  // ACL link
-                // Wiimotes require us to be master - set policy before BTstack auto-accepts
-                printf("[BTSTACK_HOST] Wiimote: setting master role policy\n");
-                hci_set_master_slave_policy(0);  // 0 = become master
-            }
             // BTstack will auto-accept with the current master_slave_policy
             break;
         }
@@ -1195,14 +1183,12 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         // Incoming connection (device connected to us)
                         printf("[BTSTACK_HOST] Incoming ACL complete, COD=0x%06X\n", cod);
 
-                        // Check if this is a Wiimote - need role switch to master or it disconnects
-                        bool is_wiimote = ((cod >> 16) == 0x00) &&
-                                          (((cod >> 8) & 0x1F) == 0x05) &&
-                                          ((cod & 0x0C) != 0);
-                        if (classic_state.pending_name[0] &&
-                            strstr(classic_state.pending_name, "Nintendo RVL") != NULL) {
-                            is_wiimote = true;
-                        }
+                        // Detect Wiimote by name (if available from prior inquiry).
+                        // For incoming reconnections, pending_name is typically empty at
+                        // this point — Wiimote detection is deferred to HID_SUBEVENT_CONNECTION_OPENED
+                        // or REMOTE_NAME_REQUEST_COMPLETE when the name becomes available.
+                        bool is_wiimote = (classic_state.pending_name[0] &&
+                                           strstr(classic_state.pending_name, "Nintendo RVL") != NULL);
 
                         if (is_wiimote) {
                             // Wiimote reconnection - check role and link key
@@ -1254,9 +1240,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         }
 
                         if (!is_wiimote) {
-                            // For non-Wiimote incoming connections, use standard flow
-                            // DS3 (0x000508) and DS4/DS5 (0x002508) all initiate themselves on reconnect
-                            // We just need encryption to succeed, then wait for HID_SUBEVENT_INCOMING_CONNECTION
+                            // Standard incoming connection flow (DS3, DS4, DS5, or unknown device).
+                            // If this is actually a Wiimote reconnection where the name wasn't
+                            // available yet, it will be detected later when the name resolves
+                            // (see REMOTE_NAME_REQUEST_COMPLETE and HID_SUBEVENT_CONNECTION_OPENED).
 
                             // Request remote name for driver matching (we don't have it from inquiry)
                             gap_remote_name_request(addr, 0, 0);
@@ -1265,10 +1252,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                             sdp_client_query_uuid16(&sdp_query_vid_pid_callback, addr,
                                                     BLUETOOTH_SERVICE_CLASS_PNP_INFORMATION);
 
-                            // Request authentication (Bluepad32 pattern)
+                            // Request authentication — required for DS4/DS5/DS3 and harmless
+                            // for Wiimotes that already have a stored link key
                             gap_request_security_level(handle, LEVEL_2);
                         }
-                        // For Wiimotes: do nothing, wait for device to drive the process
                     }
                 }
             }
@@ -1453,6 +1440,26 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         printf("[BTSTACK_HOST] Updated wiimote name: %s\n", wiimote_conn.name);
                     }
                 }
+
+                // Late Wiimote detection for incoming reconnections: if the name
+                // resolves to a Nintendo device and wiimote_conn wasn't set up at
+                // CONNECTION_COMPLETE (because name was unknown), set it up now so
+                // HID_SUBEVENT_INCOMING_CONNECTION can route it correctly.
+                if (!wiimote_conn.active &&
+                    strstr(name, "Nintendo RVL") != NULL &&
+                    classic_state.pending_valid &&
+                    !classic_state.pending_outgoing &&
+                    memcmp(name_addr, classic_state.pending_addr, 6) == 0) {
+                    printf("[BTSTACK_HOST] Late Wiimote detection from name resolution (incoming reconnection)\n");
+                    memset(&wiimote_conn, 0, sizeof(wiimote_conn));
+                    wiimote_conn.active = true;
+                    wiimote_conn.state = WIIMOTE_STATE_IDLE;
+                    wiimote_conn.conn_index = -1;
+                    memcpy(wiimote_conn.addr, name_addr, 6);
+                    memcpy(wiimote_conn.class_of_device, &classic_state.pending_cod, 3);
+                    strncpy(wiimote_conn.name, name, sizeof(wiimote_conn.name) - 1);
+                    wiimote_conn.name[sizeof(wiimote_conn.name) - 1] = '\0';
+                }
             }
             break;
         }
@@ -1522,21 +1529,19 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             printf("[BTSTACK_HOST] PIN code request: %02X:%02X:%02X:%02X:%02X:%02X\n",
                    pin_addr[0], pin_addr[1], pin_addr[2], pin_addr[3], pin_addr[4], pin_addr[5]);
 
-            // Check if this is a Wiimote/Wii U Pro by checking pending COD or name
-            // Wiimote COD: Major=0x05 (Peripheral), has pointing device flag (0x04 or 0x08)
+            // Check if this is a Wiimote/Wii U Pro by name
             bool is_wiimote = false;
             if (classic_state.pending_valid &&
                 bd_addr_cmp(pin_addr, classic_state.pending_addr) == 0) {
-                uint32_t cod = classic_state.pending_cod;
-                // Check: major service class = 0, major device = Peripheral (0x05), pointing flag set
-                is_wiimote = ((cod >> 16) == 0x00) &&
-                             (((cod >> 8) & 0x1F) == 0x05) &&
-                             ((cod & 0x0C) != 0);
-                // Also check name if available
                 if (classic_state.pending_name[0] &&
                     strstr(classic_state.pending_name, "Nintendo RVL") != NULL) {
                     is_wiimote = true;
                 }
+            }
+            // Also check wiimote_conn state (may have been set up during inquiry)
+            if (!is_wiimote && wiimote_conn.active &&
+                memcmp(pin_addr, wiimote_conn.addr, 6) == 0) {
+                is_wiimote = true;
             }
 
             if (is_wiimote) {
@@ -2844,13 +2849,12 @@ static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8
                 // Wiimotes don't send standard HID descriptors, so we need to
                 // call bt_on_hid_ready() now instead of waiting for descriptor
                 // COD is stored little-endian: [0]=LSB, [2]=MSB
-                uint32_t cod = conn->class_of_device[0] |
-                               (conn->class_of_device[1] << 8) |
-                               (conn->class_of_device[2] << 16);
-                bool is_wiimote = ((cod >> 16) == 0x00) &&
-                                  (((cod >> 8) & 0x1F) == 0x05) &&
-                                  ((cod & 0x0C) != 0);
-                if (strstr(conn->name, "Nintendo RVL") != NULL) {
+                // Detect Wiimote/Wii U Pro by name (not COD, which false-matches DS4/DS5/DS3)
+                bool is_wiimote = (conn->name[0] && strstr(conn->name, "Nintendo RVL") != NULL);
+
+                // Also check wiimote_conn state (may have been set up during inquiry)
+                if (!is_wiimote && wiimote_conn.active &&
+                    memcmp(conn->addr, wiimote_conn.addr, 6) == 0) {
                     is_wiimote = true;
                 }
 
@@ -2875,9 +2879,21 @@ static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8
                         }
                     }
 
+                    // Initialize wiimote_conn if not already active (e.g., incoming
+                    // reconnection where name wasn't available at CONNECTION_COMPLETE)
+                    if (!wiimote_conn.active) {
+                        memset(&wiimote_conn, 0, sizeof(wiimote_conn));
+                        wiimote_conn.active = true;
+                        wiimote_conn.state = WIIMOTE_STATE_IDLE;
+                        memcpy(wiimote_conn.addr, conn->addr, 6);
+                        memcpy(wiimote_conn.class_of_device, conn->class_of_device, 3);
+                        wiimote_conn.using_hid_host = true;
+                        wiimote_conn.hid_host_cid = hid_cid;
+                    }
+
                     // Link wiimote_conn to this classic_connection slot for routing
                     int conn_index = get_classic_conn_index(hid_cid);
-                    if (conn_index >= 0 && wiimote_conn.active) {
+                    if (conn_index >= 0) {
                         wiimote_conn.conn_index = conn_index;
                         wiimote_conn.vendor_id = conn->vendor_id;
                         wiimote_conn.product_id = conn->product_id;
