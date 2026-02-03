@@ -25,6 +25,9 @@
 
 static uint8_t prev_report[CFG_TUH_DEVICE_MAX + 1][CFG_TUH_HID][DUALSTRIKE_REPORT_SIZE];
 
+// Hat mode: false = D-pad buttons (default), true = left analog axes
+static bool hat_analog_mode[CFG_TUH_DEVICE_MAX + 1][CFG_TUH_HID];
+
 static bool is_ms_sidewinder_dualstrike(uint16_t vid, uint16_t pid) {
     return (vid == MICROSOFT_VID && pid == DUALSTRIKE_PID);
 }
@@ -32,6 +35,7 @@ static bool is_ms_sidewinder_dualstrike(uint16_t vid, uint16_t pid) {
 static bool init_ms_sidewinder_dualstrike(uint8_t dev_addr, uint8_t instance) {
     printf("[DualStrike] Device mounted: dev_addr=%d, instance=%d\n", dev_addr, instance);
     memset(&prev_report[dev_addr][instance], 0, DUALSTRIKE_REPORT_SIZE);
+    hat_analog_mode[dev_addr][instance] = false;
     return true;
 }
 
@@ -76,10 +80,6 @@ static void process_ms_sidewinder_dualstrike(uint8_t dev_addr, uint8_t instance,
     uint8_t raw_twist = report[2] & 0x0F;
     int8_t twist = sign_extend_4(raw_twist);
 
-    // Extract L3/R3 (bits 22-23)
-    bool l3 = (report[2] >> 6) & 1;
-    bool r3 = (report[2] >> 7) & 1;
-
     // Extract buttons 1-9 (bits 24-32)
     uint16_t btns = report[3] | ((uint16_t)(report[4] & 0x01) << 8);
 
@@ -87,19 +87,58 @@ static void process_ms_sidewinder_dualstrike(uint8_t dev_addr, uint8_t instance,
     uint8_t hat = (report[4] >> 4) & 0x0F;
 
     // Hat switch to D-pad (standard 8-direction encoding)
-    bool dpad_up    = (hat == 0 || hat == 1 || hat == 7);
-    bool dpad_right = (hat >= 1 && hat <= 3);
-    bool dpad_down  = (hat >= 3 && hat <= 5);
-    bool dpad_left  = (hat >= 5 && hat <= 7);
+    bool hat_up    = (hat == 0 || hat == 1 || hat == 7);
+    bool hat_right = (hat >= 1 && hat <= 3);
+    bool hat_down  = (hat >= 3 && hat <= 5);
+    bool hat_left  = (hat >= 5 && hat <= 7);
 
     // Map buttons to JP_BUTTON format
     uint32_t buttons = 0;
+    bool start_held = (btns & (1 << 8)) != 0;
 
-    // D-pad
-    if (dpad_up)    buttons |= JP_BUTTON_DU;
-    if (dpad_down)  buttons |= JP_BUTTON_DD;
-    if (dpad_left)  buttons |= JP_BUTTON_DL;
-    if (dpad_right) buttons |= JP_BUTTON_DR;
+    // Mode switching: S2 + hat left = analog mode, S2 + hat right = D-pad mode
+    if (start_held && hat_left) {
+        if (hat_analog_mode[dev_addr][instance]) return;  // Already in analog mode
+        hat_analog_mode[dev_addr][instance] = true;
+        printf("[DualStrike] Hat mode: Analog\n");
+        memcpy(prev_report[dev_addr][instance], report, DUALSTRIKE_REPORT_SIZE);
+        return;  // Consume this input
+    }
+    if (start_held && hat_right) {
+        if (!hat_analog_mode[dev_addr][instance]) return;  // Already in D-pad mode
+        hat_analog_mode[dev_addr][instance] = false;
+        printf("[DualStrike] Hat mode: D-pad\n");
+        memcpy(prev_report[dev_addr][instance], report, DUALSTRIKE_REPORT_SIZE);
+        return;  // Consume this input
+    }
+
+    // Scale 10-bit signed (-512..511) to 8-bit unsigned (0..255, center 128)
+    uint8_t analog_lx = (uint8_t)((axis_x + 512) * 255 / 1023);
+    uint8_t analog_ly = (uint8_t)((axis_y + 512) * 255 / 1023);
+
+    // Scale 4-bit signed (-8..7) to 8-bit unsigned (0..255, center 128)
+    uint8_t analog_rz = (uint8_t)((twist + 8) * 255 / 15);
+
+    // Ensure non-zero (internal convention)
+    analog_lx = (analog_lx == 0) ? 1 : analog_lx;
+    analog_ly = (analog_ly == 0) ? 1 : analog_ly;
+    analog_rz = (analog_rz == 0) ? 1 : analog_rz;
+
+    // Hat switch: either D-pad buttons or left analog axes
+    uint8_t hat_lx = 128, hat_ly = 128;
+    if (hat_analog_mode[dev_addr][instance]) {
+        // Analog mode: hat → left stick axes
+        if (hat_left)  hat_lx = 0;
+        if (hat_right) hat_lx = 255;
+        if (hat_up)    hat_ly = 0;
+        if (hat_down)  hat_ly = 255;
+    } else {
+        // D-pad mode (default): hat → D-pad buttons
+        if (hat_up)    buttons |= JP_BUTTON_DU;
+        if (hat_down)  buttons |= JP_BUTTON_DD;
+        if (hat_left)  buttons |= JP_BUTTON_DL;
+        if (hat_right) buttons |= JP_BUTTON_DR;
+    }
 
     // Face buttons (bits 24-27: B4, B3, B2, B1)
     if (btns & (1 << 0)) buttons |= JP_BUTTON_B4;  // Button 1 = North
@@ -114,23 +153,7 @@ static void process_ms_sidewinder_dualstrike(uint8_t dev_addr, uint8_t instance,
     if (btns & (1 << 7)) buttons |= JP_BUTTON_R2;
 
     // Start (bit 32)
-    if (btns & (1 << 8)) buttons |= JP_BUTTON_S2;
-
-    // Tilt extreme clicks
-    if (l3) buttons |= JP_BUTTON_L3;
-    if (r3) buttons |= JP_BUTTON_R3;
-
-    // Scale 10-bit signed (-512..511) to 8-bit unsigned (0..255, center 128)
-    uint8_t analog_lx = (uint8_t)((axis_x + 512) * 255 / 1023);
-    uint8_t analog_ly = (uint8_t)((axis_y + 512) * 255 / 1023);
-
-    // Scale 4-bit signed (-8..7) to 8-bit unsigned (0..255, center 128)
-    uint8_t analog_rz = (uint8_t)((twist + 8) * 255 / 15);
-
-    // Ensure non-zero (internal convention)
-    analog_lx = (analog_lx == 0) ? 1 : analog_lx;
-    analog_ly = (analog_ly == 0) ? 1 : analog_ly;
-    analog_rz = (analog_rz == 0) ? 1 : analog_rz;
+    if (start_held) buttons |= JP_BUTTON_S2;
 
     input_event_t event = {
         .dev_addr = dev_addr,
@@ -138,8 +161,8 @@ static void process_ms_sidewinder_dualstrike(uint8_t dev_addr, uint8_t instance,
         .type = INPUT_TYPE_GAMEPAD,
         .transport = INPUT_TRANSPORT_USB,
         .buttons = buttons,
-        .button_count = 11,
-        .analog = {128, 128, analog_lx, analog_ly, 0, 0, analog_rz},
+        .button_count = 9,
+        .analog = {hat_lx, hat_ly, analog_lx, analog_ly, 0, 0, analog_rz},
         .keys = 0,
     };
     router_submit_input(&event);
