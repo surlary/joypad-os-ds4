@@ -64,6 +64,7 @@ static bool rgb_dirty = false;
 static bool feature_request_pending = false;
 static uint8_t cached_face_style = SINPUT_FACE_XBOX;
 static uint8_t cached_gamepad_type = SINPUT_TYPE_STANDARD;
+static bool cached_has_motion = false;
 static int16_t last_dev_addr = -1;  // Track connected device for auto feature report
 
 // ============================================================================
@@ -238,6 +239,9 @@ static bool sinput_mode_send_report(uint8_t player_index,
     // Update device face style from connected controller
     update_device_info(event->dev_addr, event->instance, event->transport);
 
+    // Track motion capability from input device
+    cached_has_motion = event->has_motion;
+
     // Send feature report automatically when a new device connects
     if (event->dev_addr != last_dev_addr) {
         last_dev_addr = event->dev_addr;
@@ -264,13 +268,22 @@ static bool sinput_mode_send_report(uint8_t player_index,
     // IMU timestamp (microseconds since boot)
     sinput_report.imu_timestamp = time_us_32();
 
-    // IMU data - set to neutral (no IMU hardware yet)
-    sinput_report.accel_x = 0;
-    sinput_report.accel_y = 0;
-    sinput_report.accel_z = 0;  // Could set to ~1G if simulating gravity
-    sinput_report.gyro_x = 0;
-    sinput_report.gyro_y = 0;
-    sinput_report.gyro_z = 0;
+    // IMU data - passthrough from input controller if available
+    if (event->has_motion) {
+        sinput_report.accel_x = event->accel[0];
+        sinput_report.accel_y = event->accel[1];
+        sinput_report.accel_z = event->accel[2];
+        sinput_report.gyro_x = event->gyro[0];
+        sinput_report.gyro_y = event->gyro[1];
+        sinput_report.gyro_z = event->gyro[2];
+    } else {
+        sinput_report.accel_x = 0;
+        sinput_report.accel_y = 0;
+        sinput_report.accel_z = 0;
+        sinput_report.gyro_x = 0;
+        sinput_report.gyro_y = 0;
+        sinput_report.gyro_z = 0;
+    }
 
     // Send report (skip report_id byte since TinyUSB handles it)
     return tud_hid_report(SINPUT_REPORT_ID_INPUT,
@@ -434,8 +447,11 @@ static void sinput_mode_task(void)
     feature_response[0] = 0x00;
     feature_response[1] = 0x01;
 
-    // Capability flags 1: rumble + player LED supported
-    feature_response[2] = 0x03;  // bit 0 = rumble, bit 1 = player LED
+    // Capability flags 1: bit 0=rumble, bit 1=player LED, bit 2=accel, bit 3=gyro
+    feature_response[2] = 0x03;  // rumble + player LED always
+    if (cached_has_motion) {
+        feature_response[2] |= 0x0C;  // bit 2 = accel, bit 3 = gyro
+    }
 
     // Capability flags 2: RGB LED supported
     feature_response[3] = 0x02;  // bit 1 = RGB LED
@@ -450,11 +466,20 @@ static void sinput_mode_task(void)
     feature_response[6] = 0x40;  // 8000 & 0xFF
     feature_response[7] = 0x1F;  // 8000 >> 8
 
-    // Accel/Gyro ranges: 0 (not supported on adapter)
-    feature_response[8] = 0;
-    feature_response[9] = 0;
-    feature_response[10] = 0;
-    feature_response[11] = 0;
+    // Accel/Gyro ranges (uint16 LE): 0 = not supported
+    if (cached_has_motion) {
+        // Accel range: 4 (+/- 4G, typical for DS4/DS5)
+        feature_response[8] = 4;
+        feature_response[9] = 0;
+        // Gyro range: 2000 (+/- 2000 dps, typical for DS4/DS5)
+        feature_response[10] = 0xD0;  // 2000 & 0xFF
+        feature_response[11] = 0x07;  // 2000 >> 8
+    } else {
+        feature_response[8] = 0;
+        feature_response[9] = 0;
+        feature_response[10] = 0;
+        feature_response[11] = 0;
+    }
 
     // Button usage masks: which buttons are active per byte
     // Byte 0: EAST|SOUTH|NORTH|WEST|DU|DD|DL|DR = all 8 bits
