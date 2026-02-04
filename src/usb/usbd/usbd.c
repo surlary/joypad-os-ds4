@@ -782,14 +782,18 @@ void usbd_task(void)
             break;
 
         case USB_OUTPUT_MODE_SINPUT:
-        default:
+        default: {
             // SInput mode: process CDC tasks
             cdc_task();
+            // Run mode task (handles feature response)
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_SINPUT];
+            if (mode && mode->task) mode->task();
             // Send SInput report if device is ready
             if (tud_hid_ready()) {
                 usbd_send_report(0);
             }
             break;
+        }
     }
 }
 

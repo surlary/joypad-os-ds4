@@ -10,7 +10,42 @@
 #include "../usbd.h"
 #include "descriptors/sinput_descriptors.h"
 #include "core/buttons.h"
+#include "core/services/players/manager.h"
+#include "pico/unique_id.h"
 #include <string.h>
+
+#if (defined(CONFIG_USB_HOST) || defined(CONFIG_USB)) && !defined(DISABLE_USB_HOST)
+#include "usb/usbh/hid/hid_registry.h"
+extern int hid_get_ctrl_type(uint8_t dev_addr, uint8_t instance);
+#endif
+
+#ifdef ENABLE_BTSTACK
+#include "bt/bthid/bthid.h"
+#endif
+
+// ============================================================================
+// SINPUT FACE STYLES
+// ============================================================================
+
+// Face style values (byte 5, upper 3 bits) - per SDL/SInput spec
+#define SINPUT_FACE_XBOX         0  // ABXY (default)
+#define SINPUT_FACE_GAMECUBE     2  // AXBY
+#define SINPUT_FACE_NINTENDO     3  // BAYX
+#define SINPUT_FACE_SONY         4  // Sony (Cross/Circle/Square/Triangle)
+
+// Gamepad physical type values (byte 4) - per SInput spec
+#define SINPUT_TYPE_UNKNOWN      0
+#define SINPUT_TYPE_STANDARD     1
+#define SINPUT_TYPE_XBOX360      2
+#define SINPUT_TYPE_XBOXONE      3
+#define SINPUT_TYPE_PS3          4
+#define SINPUT_TYPE_PS4          5
+#define SINPUT_TYPE_PS5          6
+#define SINPUT_TYPE_SWITCH_PRO   7
+#define SINPUT_TYPE_JOYCON_L     8
+#define SINPUT_TYPE_JOYCON_R     9
+#define SINPUT_TYPE_JOYCON_PAIR  10
+#define SINPUT_TYPE_GAMECUBE     11
 
 // ============================================================================
 // STATE
@@ -25,6 +60,8 @@ static uint8_t rgb_g = 0;
 static uint8_t rgb_b = 0;
 static bool rgb_dirty = false;
 static bool feature_request_pending = false;
+static uint8_t cached_face_style = SINPUT_FACE_XBOX;
+static uint8_t cached_gamepad_type = SINPUT_TYPE_STANDARD;
 
 // ============================================================================
 // CONVERSION HELPERS
@@ -83,6 +120,83 @@ static uint32_t convert_buttons(uint32_t buttons)
 }
 
 // ============================================================================
+// DEVICE DETECTION
+// ============================================================================
+
+// Determine face style and gamepad type from device address, instance, and transport
+static void update_device_info(uint8_t dev_addr, int8_t instance, input_transport_t transport)
+{
+#if (defined(CONFIG_USB_HOST) || defined(CONFIG_USB)) && !defined(DISABLE_USB_HOST)
+    if (transport == INPUT_TRANSPORT_USB) {
+        int ctrl_type = hid_get_ctrl_type(dev_addr, instance);
+        switch (ctrl_type) {
+            case CONTROLLER_DUALSHOCK3:
+                cached_face_style = SINPUT_FACE_SONY;
+                cached_gamepad_type = SINPUT_TYPE_PS3;
+                return;
+            case CONTROLLER_DUALSHOCK4:
+            case CONTROLLER_PSCLASSIC:
+                cached_face_style = SINPUT_FACE_SONY;
+                cached_gamepad_type = SINPUT_TYPE_PS4;
+                return;
+            case CONTROLLER_DUALSENSE:
+                cached_face_style = SINPUT_FACE_SONY;
+                cached_gamepad_type = SINPUT_TYPE_PS5;
+                return;
+            case CONTROLLER_SWITCH:
+            case CONTROLLER_SWITCH2:
+                cached_face_style = SINPUT_FACE_NINTENDO;
+                cached_gamepad_type = SINPUT_TYPE_SWITCH_PRO;
+                return;
+            case CONTROLLER_GAMECUBE:
+                cached_face_style = SINPUT_FACE_GAMECUBE;
+                cached_gamepad_type = SINPUT_TYPE_GAMECUBE;
+                return;
+            default:
+                cached_face_style = SINPUT_FACE_XBOX;
+                cached_gamepad_type = SINPUT_TYPE_STANDARD;
+                return;
+        }
+    }
+#endif
+
+#ifdef ENABLE_BTSTACK
+    // Try BT lookup — some BT drivers don't set transport on the event,
+    // so attempt this for any non-USB transport (including NONE)
+    if (transport != INPUT_TRANSPORT_USB) {
+        bthid_device_t* bt_dev = bthid_get_device(dev_addr);
+        if (bt_dev) {
+            switch (bt_dev->vendor_id) {
+                case 0x054C:  // Sony
+                    cached_face_style = SINPUT_FACE_SONY;
+                    if (bt_dev->product_id == 0x0268) {
+                        cached_gamepad_type = SINPUT_TYPE_PS3;
+                    } else if (bt_dev->product_id == 0x0CE6 ||
+                               bt_dev->product_id == 0x0DF2) {
+                        cached_gamepad_type = SINPUT_TYPE_PS5;
+                    } else {
+                        cached_gamepad_type = SINPUT_TYPE_PS4;
+                    }
+                    return;
+                case 0x057E:  // Nintendo
+                    cached_face_style = SINPUT_FACE_NINTENDO;
+                    cached_gamepad_type = SINPUT_TYPE_SWITCH_PRO;
+                    return;
+                case 0x045E:  // Microsoft
+                    cached_face_style = SINPUT_FACE_XBOX;
+                    cached_gamepad_type = SINPUT_TYPE_XBOXONE;
+                    return;
+                default:
+                    cached_face_style = SINPUT_FACE_XBOX;
+                    cached_gamepad_type = SINPUT_TYPE_STANDARD;
+                    return;
+            }
+        }
+    }
+#endif
+}
+
+// ============================================================================
 // MODE INTERFACE IMPLEMENTATION
 // ============================================================================
 
@@ -117,7 +231,9 @@ static bool sinput_mode_send_report(uint8_t player_index,
                                      uint32_t buttons)
 {
     (void)player_index;
-    (void)event;
+
+    // Update device face style from connected controller
+    update_device_info(event->dev_addr, event->instance, event->transport);
 
     // Convert buttons to SInput format (32-bit across 4 bytes)
     uint32_t sinput_buttons = convert_buttons(buttons);
@@ -274,17 +390,27 @@ static void sinput_mode_task(void)
 
     feature_request_pending = false;
 
-    // Build feature response (12 bytes)
-    // Format per SInput spec:
-    // Bytes 0-1: Protocol version (uint16 LE)
-    // Byte 2: Capability flags 1 (bit 0=rumble, bit 1=player LED, bit 2=accel, bit 3=gyro)
-    // Byte 3: Capability flags 2 (bit 1=RGB LED)
-    // Byte 4: Gamepad type (1=standard)
-    // Byte 5: Upper 3 bits=face style (1=Xbox), lower 5 bits=sub product
-    // Bytes 6-7: Polling rate micros (uint16 LE) - 8000us = 125Hz
-    // Bytes 8-9: Accel range (uint16 LE) - 0 = not supported
+    // Refresh device info from player 0 before building response
+    if (playersCount > 0 && players[0].dev_addr >= 0) {
+        update_device_info((uint8_t)players[0].dev_addr,
+                           (int8_t)players[0].instance,
+                           players[0].transport);
+    }
+
+    // Build feature response (24 bytes per SInput spec)
+    // Bytes 0-1:   Protocol version (uint16 LE)
+    // Byte 2:      Capability flags 1 (bit 0=rumble, bit 1=player LED, bit 2=accel, bit 3=gyro)
+    // Byte 3:      Capability flags 2 (bit 1=RGB LED)
+    // Byte 4:      Gamepad type (1=standard)
+    // Byte 5:      Upper 3 bits=face style (1=Xbox), lower 5 bits=sub product
+    // Bytes 6-7:   Polling rate micros (uint16 LE) - 8000us = 125Hz
+    // Bytes 8-9:   Accel range (uint16 LE) - 0 = not supported
     // Bytes 10-11: Gyro range (uint16 LE) - 0 = not supported
-    uint8_t feature_response[12] = {0};
+    // Bytes 12-15: Button usage masks (1 byte per button byte, bits = active buttons)
+    // Byte 16:     Touchpad count
+    // Byte 17:     Touchpad finger count
+    // Bytes 18-23: MAC address / serial number (6 bytes)
+    uint8_t feature_response[24] = {0};
 
     // Protocol version 1.0
     feature_response[0] = 0x00;
@@ -296,11 +422,11 @@ static void sinput_mode_task(void)
     // Capability flags 2: RGB LED supported
     feature_response[3] = 0x02;  // bit 1 = RGB LED
 
-    // Gamepad type: Standard (1)
-    feature_response[4] = 0x01;
+    // Gamepad type (from connected device)
+    feature_response[4] = cached_gamepad_type;
 
-    // Face style: Xbox (1 << 5) | sub product (0)
-    feature_response[5] = (0x01 << 5);
+    // Face style (from connected device) | sub product (0)
+    feature_response[5] = (cached_face_style << 5);
 
     // Polling rate: 8000 microseconds (125Hz)
     feature_response[6] = 0x40;  // 8000 & 0xFF
@@ -312,7 +438,31 @@ static void sinput_mode_task(void)
     feature_response[10] = 0;
     feature_response[11] = 0;
 
-    printf("[sinput] Sending feature response (RGB LED supported)\n");
+    // Button usage masks: which buttons are active per byte
+    // Byte 0: EAST|SOUTH|NORTH|WEST|DU|DD|DL|DR = all 8 bits
+    feature_response[12] = 0xFF;
+    // Byte 1: L3|R3|L1|R1|L2|R2|L_PADDLE1|R_PADDLE1 = all 8 bits
+    feature_response[13] = 0xFF;
+    // Byte 2: START|BACK|GUIDE|CAPTURE = lower 4 bits
+    feature_response[14] = 0x0F;
+    // Byte 3: no power/misc buttons
+    feature_response[15] = 0x00;
+
+    // Touchpad: not supported
+    feature_response[16] = 0;  // touchpad count
+    feature_response[17] = 0;  // touchpad finger count
+
+    // Serial number from board unique ID (last 6 bytes of 8-byte ID)
+    pico_unique_board_id_t board_id;
+    pico_get_unique_board_id(&board_id);
+    feature_response[18] = board_id.id[2];
+    feature_response[19] = board_id.id[3];
+    feature_response[20] = board_id.id[4];
+    feature_response[21] = board_id.id[5];
+    feature_response[22] = board_id.id[6];
+    feature_response[23] = board_id.id[7];
+
+    printf("[sinput] Sending feature response (24 bytes)\n");
     tud_hid_report(SINPUT_REPORT_ID_FEATURES, feature_response, sizeof(feature_response));
 }
 
