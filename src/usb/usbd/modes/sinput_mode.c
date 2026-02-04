@@ -62,6 +62,7 @@ static bool rgb_dirty = false;
 static bool feature_request_pending = false;
 static uint8_t cached_face_style = SINPUT_FACE_XBOX;
 static uint8_t cached_gamepad_type = SINPUT_TYPE_STANDARD;
+static int16_t last_dev_addr = -1;  // Track connected device for auto feature report
 
 // ============================================================================
 // CONVERSION HELPERS
@@ -234,6 +235,12 @@ static bool sinput_mode_send_report(uint8_t player_index,
 
     // Update device face style from connected controller
     update_device_info(event->dev_addr, event->instance, event->transport);
+
+    // Send feature report automatically when a new device connects
+    if (event->dev_addr != last_dev_addr) {
+        last_dev_addr = event->dev_addr;
+        feature_request_pending = true;
+    }
 
     // Convert buttons to SInput format (32-bit across 4 bytes)
     uint32_t sinput_buttons = convert_buttons(buttons);
