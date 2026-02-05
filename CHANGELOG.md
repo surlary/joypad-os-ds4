@@ -18,15 +18,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Microsoft SideWinder Dual Strike USB HID driver with hat D-pad/analog mode toggle
 - ANALOG_RZ as 7th analog axis for twist/spinner inputs
 - Full shoulder button and stick click mappings to keyboard input
+- **SInput IMU passthrough** with dynamic motion capability reporting
+- **SInput player LED support** for controller identification
+- SInput auto-sends feature report on controller connect
 
 ### Fixed
 - Bluetooth pairing regression for DualSense and other gamepads (Wiimote COD detection was too broad)
 - XInput feedback latency — added change detection and throttle
 - Input-to-output latency — disabled debug logging, gated BTstack loop, reordered main loop
 - Disabled chatpad keepalive until chatpad support is functional
+- SInput feature response now matches 24-byte spec with proper input device type detection
 
 ### Changed
 - Removed duplicate HID_KEY_* defines from kbmouse.h (uses TinyUSB's definitions)
+
+### Performance
+- Router: reduced input_event copies for tap-based outputs
+- Neo Geo: push-based output via router tap for lower latency
 
 ---
 
