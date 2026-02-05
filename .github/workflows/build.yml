@@ -373,6 +373,8 @@ jobs:
           tag_name: v${{ needs.check-version.outputs.version }}
           name: Joypad v${{ needs.check-version.outputs.version }}
           body: |
+            📋 **See [CHANGELOG.md](https://github.com/joypad-ai/joypad-os/blob/main/CHANGELOG.md) for full release notes.**
+
             ## Installation
 
             1. Disconnect adapter from console and all USB devices
