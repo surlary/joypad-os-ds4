@@ -143,6 +143,8 @@ typedef struct {
     // Gyroscope: angular velocity, DS3 only has Z axis (X/Y remain 0)
     int16_t accel[3];           // Accelerometer X, Y, Z
     int16_t gyro[3];            // Gyroscope X, Y, Z
+    uint16_t gyro_range;        // Gyro full-scale range in dps (e.g., 100 for DS3, 2000 for DS4/DS5)
+    uint16_t accel_range;       // Accel full-scale range in milli-g (e.g., 2000 for DS3, 4000 for DS4/DS5)
     bool has_motion;            // Motion data is valid
 
     // Pressure-sensitive button data (DS3)
@@ -191,6 +193,8 @@ static inline void init_input_event(input_event_t* event) {
 
     // Clear motion data
     event->has_motion = false;
+    event->gyro_range = 2000;   // Default to DS4/DS5 range (±2000 dps)
+    event->accel_range = 4000;  // Default to DS4/DS5 range (±4g in milli-g)
     for (int i = 0; i < 3; i++) {
         event->accel[i] = 0;
         event->gyro[i] = 0;

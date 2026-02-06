@@ -106,11 +106,33 @@ static bool ps3_mode_send_report(uint8_t player_index,
     }
 
     // Motion data (SIXAXIS) - big-endian 16-bit values
+    // Internal format is normalized to SInput convention: ±32767 = ±2000 dps (gyro), ±4g (accel)
+    // PS3 expects: centered at 512, ±512 range for ±100 dps (gyro), ±2g (accel)
     if (event->has_motion) {
-        ps3_report.accel_x = __builtin_bswap16((uint16_t)event->accel[0]);
-        ps3_report.accel_y = __builtin_bswap16((uint16_t)event->accel[1]);
-        ps3_report.accel_z = __builtin_bswap16((uint16_t)event->accel[2]);
-        ps3_report.gyro_z  = __builtin_bswap16((uint16_t)event->gyro[2]);
+        // De-normalize gyro from SInput (±32767 = ±2000 dps) to DS3 (±512 = ±100 dps, centered at 512)
+        // Conversion: raw = (normalized * 10240 / 32767) + 512
+        int32_t gyro_raw = ((int32_t)event->gyro[2] * 10240) / 32767 + 512;
+        // Clamp to valid DS3 range (10-bit: 0-1023)
+        if (gyro_raw < 0) gyro_raw = 0;
+        if (gyro_raw > 1023) gyro_raw = 1023;
+
+        // De-normalize accel from SInput (±32767 = ±4g) to DS3 (±512 = ±2g, centered at 512)
+        // Conversion: raw = (normalized * 1024 / 32767) + 512
+        int32_t accel_x_raw = ((int32_t)event->accel[0] * 1024) / 32767 + 512;
+        int32_t accel_y_raw = ((int32_t)event->accel[1] * 1024) / 32767 + 512;
+        int32_t accel_z_raw = ((int32_t)event->accel[2] * 1024) / 32767 + 512;
+        // Clamp to valid DS3 range (10-bit: 0-1023)
+        if (accel_x_raw < 0) accel_x_raw = 0;
+        if (accel_x_raw > 1023) accel_x_raw = 1023;
+        if (accel_y_raw < 0) accel_y_raw = 0;
+        if (accel_y_raw > 1023) accel_y_raw = 1023;
+        if (accel_z_raw < 0) accel_z_raw = 0;
+        if (accel_z_raw > 1023) accel_z_raw = 1023;
+
+        ps3_report.accel_x = __builtin_bswap16((uint16_t)accel_x_raw);
+        ps3_report.accel_y = __builtin_bswap16((uint16_t)accel_y_raw);
+        ps3_report.accel_z = __builtin_bswap16((uint16_t)accel_z_raw);
+        ps3_report.gyro_z  = __builtin_bswap16((uint16_t)gyro_raw);
     } else {
         // Neutral motion (center at 512 = 0x0200, big-endian = 0x0002)
         ps3_report.accel_x = PS3_SIXAXIS_MID_BE;

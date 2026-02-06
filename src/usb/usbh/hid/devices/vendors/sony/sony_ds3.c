@@ -147,10 +147,26 @@ void input_sony_ds3(uint8_t dev_addr, uint8_t instance, uint8_t const* report, u
     bool has_motion = false;
     if (len >= 48) {
       // DS3 accelerometer: big-endian 16-bit values centered at ~512
-      accel_x = (int16_t)((report[40] << 8) | report[41]);
-      accel_y = (int16_t)((report[42] << 8) | report[43]);
-      accel_z = (int16_t)((report[44] << 8) | report[45]);
-      gyro_z  = (int16_t)((report[46] << 8) | report[47]);
+      // DS3 gyro: 10-bit centered at ~512, range ±100 dps
+      int16_t raw_accel_x = (int16_t)((report[40] << 8) | report[41]);
+      int16_t raw_accel_y = (int16_t)((report[42] << 8) | report[43]);
+      int16_t raw_accel_z = (int16_t)((report[44] << 8) | report[45]);
+      int16_t raw_gyro_z  = (int16_t)((report[46] << 8) | report[47]);
+
+      // Normalize gyro to SInput convention: ±32767 = ±2000 dps
+      // DS3 gyro: centered at 512, ±512 = ±100 dps
+      // Conversion: normalized = (raw - 512) * 32767 / 10240
+      // This maps DS3's ±100 dps to ±1638 in SInput units (since 100/2000 * 32767 ≈ 1638)
+      gyro_z = (int16_t)(((int32_t)(raw_gyro_z - 512) * 32767) / 10240);
+
+      // Normalize accel to SInput convention: ±32767 = ±4g
+      // DS3 accel: centered at ~512, ±512 = ±2g
+      // Conversion: normalized = (raw - 512) * 32767 / 1024
+      // This maps DS3's ±2g to ±16384 in SInput units (since 2/4 * 32767 ≈ 16384)
+      accel_x = (int16_t)(((int32_t)(raw_accel_x - 512) * 32767) / 1024);
+      accel_y = (int16_t)(((int32_t)(raw_accel_y - 512) * 32767) / 1024);
+      accel_z = (int16_t)(((int32_t)(raw_accel_z - 512) * 32767) / 1024);
+
       has_motion = true;
     }
 
@@ -236,6 +252,8 @@ void input_sony_ds3(uint8_t dev_addr, uint8_t instance, uint8_t const* report, u
         .has_motion = has_motion,
         .accel = {accel_x, accel_y, accel_z},
         .gyro = {0, 0, gyro_z},  // DS3 only has Z-axis gyro
+        .gyro_range = 100,   // DS3 gyro is ±100 dps
+        .accel_range = 2000, // DS3 accel is ±2g (2000 milli-g)
         .has_pressure = true,
         // DS3 pressure mapping: struct indices are shifted due to report ID stripping
         // D-pad: up, right, down, left at pressure[4-7]

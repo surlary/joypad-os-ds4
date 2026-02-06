@@ -292,11 +292,27 @@ static void ds3_process_report(bthid_device_t* device, const uint8_t* data, uint
     int16_t accel_x = 0, accel_y = 0, accel_z = 0, gyro_z = 0;
     bool has_motion = false;
     if (len >= 48) {
-        // Big-endian 16-bit values
-        accel_x = (int16_t)((data[40] << 8) | data[41]);
-        accel_y = (int16_t)((data[42] << 8) | data[43]);
-        accel_z = (int16_t)((data[44] << 8) | data[45]);
-        gyro_z  = (int16_t)((data[46] << 8) | data[47]);
+        // DS3 accelerometer: big-endian 16-bit values centered at ~512
+        // DS3 gyro: 10-bit centered at ~512, range ±100 dps
+        int16_t raw_accel_x = (int16_t)((data[40] << 8) | data[41]);
+        int16_t raw_accel_y = (int16_t)((data[42] << 8) | data[43]);
+        int16_t raw_accel_z = (int16_t)((data[44] << 8) | data[45]);
+        int16_t raw_gyro_z  = (int16_t)((data[46] << 8) | data[47]);
+
+        // Normalize gyro to SInput convention: ±32767 = ±2000 dps
+        // DS3 gyro: centered at 512, ±512 = ±100 dps
+        // Conversion: normalized = (raw - 512) * 32767 / 10240
+        // This maps DS3's ±100 dps to ±1638 in SInput units (since 100/2000 * 32767 ≈ 1638)
+        gyro_z = (int16_t)(((int32_t)(raw_gyro_z - 512) * 32767) / 10240);
+
+        // Normalize accel to SInput convention: ±32767 = ±4g
+        // DS3 accel: centered at ~512, ±512 = ±2g
+        // Conversion: normalized = (raw - 512) * 32767 / 1024
+        // This maps DS3's ±2g to ±16384 in SInput units (since 2/4 * 32767 ≈ 16384)
+        accel_x = (int16_t)(((int32_t)(raw_accel_x - 512) * 32767) / 1024);
+        accel_y = (int16_t)(((int32_t)(raw_accel_y - 512) * 32767) / 1024);
+        accel_z = (int16_t)(((int32_t)(raw_accel_z - 512) * 32767) / 1024);
+
         has_motion = true;
     }
 
@@ -317,6 +333,8 @@ static void ds3_process_report(bthid_device_t* device, const uint8_t* data, uint
     ds3->event.gyro[0] = 0;  // DS3 only has Z-axis gyro
     ds3->event.gyro[1] = 0;
     ds3->event.gyro[2] = gyro_z;
+    ds3->event.gyro_range = 100;   // DS3 gyro is ±100 dps
+    ds3->event.accel_range = 2000; // DS3 accel is ±2g (2000 milli-g)
 
     // Pressure data (same layout as USB: first 4 bytes are reserved/junk)
     ds3->event.has_pressure = true;
