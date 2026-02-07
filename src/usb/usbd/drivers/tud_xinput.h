@@ -80,6 +80,12 @@ void tud_xinput_xsm3_init(void);
 // Process pending XSM3 auth (call from mode task loop)
 void tud_xinput_xsm3_process(void);
 
+// Handle vendor control requests for XSM3 auth
+// Called from tud_vendor_control_xfer_cb since TinyUSB routes
+// vendor-type requests there instead of to the class driver
+bool tud_xinput_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
+                                        tusb_control_request_t const* request);
+
 // ============================================================================
 // CLASS DRIVER (internal)
 // ============================================================================

@@ -193,103 +193,102 @@ static uint16_t xinput_open(uint8_t rhport, tusb_desc_interface_t const* itf_des
 
 static bool xinput_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request)
 {
-    // Only handle interface-directed vendor requests
-    if (request->bmRequestType_bit.recipient != TUSB_REQ_RCPT_INTERFACE) {
-        return false;
-    }
+    (void)rhport;
+    (void)stage;
+    (void)request;
+    // Vendor-type requests (including XSM3 auth) are routed by TinyUSB to
+    // tud_vendor_control_xfer_cb(), not here. See tud_xinput_vendor_control_xfer_cb().
+    return true;
+}
 
-    // --- Gamepad interface control requests ---
-    if (request->wIndex == _xinput_itf.itf_num) {
-        TU_LOG2("[XINPUT] Gamepad ctrl: bmReqType=0x%02X bReq=0x%02X wVal=0x%04X wLen=%u\r\n",
-                request->bmRequestType, request->bRequest, request->wValue, request->wLength);
-        return false;  // STALL unknown gamepad requests
-    }
+// ============================================================================
+// VENDOR CONTROL REQUEST HANDLER (XSM3 Auth)
+// ============================================================================
+// TinyUSB routes vendor-type control requests to tud_vendor_control_xfer_cb()
+// rather than to class driver control_xfer_cb. This function is called from
+// tud_vendor_control_xfer_cb() in usbd.c when in XInput mode.
 
-    // --- Security interface control requests (XSM3 auth) ---
-    if (request->wIndex == _sec_itf_num) {
-        if (request->bmRequestType_bit.direction == TUSB_DIR_IN) {
-            // Device-to-host: respond on SETUP stage
-            if (stage != CONTROL_STAGE_SETUP) return true;
+bool tud_xinput_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request)
+{
+    if (request->bmRequestType_bit.direction == TUSB_DIR_IN) {
+        // Device-to-host: respond on SETUP stage
+        if (stage != CONTROL_STAGE_SETUP) return true;
 
+        switch (request->bRequest) {
+            case XSM3_REQ_GET_SERIAL: {
+                // 0x81: Return 29-byte identification data
+                TU_LOG1("[XINPUT] Auth: GET_SERIAL\r\n");
+                tud_control_xfer(rhport, request,
+                                 (void*)xsm3_id_data_ms_controller,
+                                 XSM3_SERIAL_LEN);
+                return true;
+            }
+
+            case XSM3_REQ_RESPOND: {
+                // 0x83: Return challenge response
+                if (_auth_state == XSM3_AUTH_RESPONDED || _auth_state == XSM3_AUTH_AUTHENTICATED) {
+                    TU_LOG1("[XINPUT] Auth: RESPOND (%u bytes)\r\n", _auth_response_len);
+                    tud_control_xfer(rhport, request, _auth_response, _auth_response_len);
+                } else {
+                    TU_LOG1("[XINPUT] Auth: RESPOND (not ready, state=%u)\r\n", _auth_state);
+                    return false;  // STALL if not ready
+                }
+                return true;
+            }
+
+            case XSM3_REQ_KEEPALIVE: {
+                // 0x84: Keepalive, zero-length response
+                TU_LOG1("[XINPUT] Auth: KEEPALIVE\r\n");
+                tud_control_xfer(rhport, request, NULL, 0);
+                return true;
+            }
+
+            case XSM3_REQ_STATE: {
+                // 0x86: Return auth state (2 bytes)
+                // state=2 means response ready, state=1 means processing
+                static uint16_t state_val;
+                state_val = (_auth_state == XSM3_AUTH_RESPONDED ||
+                             _auth_state == XSM3_AUTH_AUTHENTICATED) ? 2 : 1;
+                TU_LOG1("[XINPUT] Auth: STATE=%u\r\n", state_val);
+                tud_control_xfer(rhport, request, &state_val, sizeof(state_val));
+                return true;
+            }
+
+            default:
+                TU_LOG2("[XINPUT] Auth: Unknown IN req 0x%02X\r\n", request->bRequest);
+                return false;
+        }
+    } else {
+        // Host-to-device: accept data on SETUP, process on DATA stage
+        if (stage == CONTROL_STAGE_SETUP) {
+            // Accept the data phase
+            tud_control_xfer(rhport, request, _auth_buffer, request->wLength);
+            return true;
+        } else if (stage == CONTROL_STAGE_DATA) {
             switch (request->bRequest) {
-                case XSM3_REQ_GET_SERIAL: {
-                    // 0x81: Return 29-byte identification data
-                    TU_LOG1("[XINPUT] Auth: GET_SERIAL\r\n");
-                    tud_control_xfer(rhport, request,
-                                     (void*)xsm3_id_data_ms_controller,
-                                     XSM3_SERIAL_LEN);
+                case XSM3_REQ_INIT_AUTH: {
+                    // 0x82: Console sends 34-byte challenge init
+                    TU_LOG1("[XINPUT] Auth: INIT_AUTH (%u bytes)\r\n", request->wLength);
+                    _auth_request_id = XSM3_REQ_INIT_AUTH;
+                    _auth_state = XSM3_AUTH_INIT_RECEIVED;
                     return true;
                 }
 
-                case XSM3_REQ_RESPOND: {
-                    // 0x83: Return challenge response
-                    if (_auth_state == XSM3_AUTH_RESPONDED || _auth_state == XSM3_AUTH_AUTHENTICATED) {
-                        TU_LOG1("[XINPUT] Auth: RESPOND (%u bytes)\r\n", _auth_response_len);
-                        tud_control_xfer(rhport, request, _auth_response, _auth_response_len);
-                    } else {
-                        TU_LOG1("[XINPUT] Auth: RESPOND (not ready, state=%u)\r\n", _auth_state);
-                        return false;  // STALL if not ready
-                    }
-                    return true;
-                }
-
-                case XSM3_REQ_KEEPALIVE: {
-                    // 0x84: Keepalive, zero-length response
-                    TU_LOG1("[XINPUT] Auth: KEEPALIVE\r\n");
-                    tud_control_xfer(rhport, request, NULL, 0);
-                    return true;
-                }
-
-                case XSM3_REQ_STATE: {
-                    // 0x86: Return auth state (2 bytes)
-                    // state=2 means response ready, state=1 means processing
-                    static uint16_t state_val;
-                    state_val = (_auth_state == XSM3_AUTH_RESPONDED ||
-                                 _auth_state == XSM3_AUTH_AUTHENTICATED) ? 2 : 1;
-                    TU_LOG1("[XINPUT] Auth: STATE=%u\r\n", state_val);
-                    tud_control_xfer(rhport, request, &state_val, sizeof(state_val));
+                case XSM3_REQ_VERIFY: {
+                    // 0x87: Console sends 22-byte verify challenge
+                    TU_LOG1("[XINPUT] Auth: VERIFY (%u bytes)\r\n", request->wLength);
+                    _auth_request_id = XSM3_REQ_VERIFY;
+                    _auth_state = XSM3_AUTH_VERIFY_RECEIVED;
                     return true;
                 }
 
                 default:
-                    TU_LOG2("[XINPUT] Auth: Unknown IN req 0x%02X\r\n", request->bRequest);
+                    TU_LOG2("[XINPUT] Auth: Unknown OUT req 0x%02X\r\n", request->bRequest);
                     return false;
             }
-        } else {
-            // Host-to-device: accept data on SETUP, process on DATA stage
-            if (stage == CONTROL_STAGE_SETUP) {
-                // Accept the data phase
-                tud_control_xfer(rhport, request, _auth_buffer, request->wLength);
-                return true;
-            } else if (stage == CONTROL_STAGE_DATA) {
-                switch (request->bRequest) {
-                    case XSM3_REQ_INIT_AUTH: {
-                        // 0x82: Console sends 34-byte challenge init
-                        TU_LOG1("[XINPUT] Auth: INIT_AUTH (%u bytes)\r\n", request->wLength);
-                        _auth_request_id = XSM3_REQ_INIT_AUTH;
-                        _auth_state = XSM3_AUTH_INIT_RECEIVED;
-                        return true;
-                    }
-
-                    case XSM3_REQ_VERIFY: {
-                        // 0x87: Console sends 22-byte verify challenge
-                        TU_LOG1("[XINPUT] Auth: VERIFY (%u bytes)\r\n", request->wLength);
-                        _auth_request_id = XSM3_REQ_VERIFY;
-                        _auth_state = XSM3_AUTH_VERIFY_RECEIVED;
-                        return true;
-                    }
-
-                    default:
-                        TU_LOG2("[XINPUT] Auth: Unknown OUT req 0x%02X\r\n", request->bRequest);
-                        return false;
-                }
-            }
-            return true;  // ACK status stage
         }
+        return true;  // ACK status stage
     }
-
-    // Not our interface
-    return false;
 }
 
 static bool xinput_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)

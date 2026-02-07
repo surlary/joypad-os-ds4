@@ -193,8 +193,8 @@ _Static_assert(sizeof(xinput_config_descriptor) == XINPUT_CONFIG_TOTAL_LEN,
 #define XINPUT_SECURITY_STRING  "Xbox Security Method 3, Version 1.00, " \
     "\xa9 2005 Microsoft Corporation. All rights reserved."
 
-// String descriptors
-#define XINPUT_MANUFACTURER  "Microsoft"
-#define XINPUT_PRODUCT       "XInput STANDARD GAMEPAD"
+// String descriptors (match real Xbox 360 wired controller)
+#define XINPUT_MANUFACTURER  "\xa9Microsoft Corporation"
+#define XINPUT_PRODUCT       "Controller"
 
 #endif // XINPUT_DESCRIPTORS_H

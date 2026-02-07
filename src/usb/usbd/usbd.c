@@ -1568,17 +1568,24 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
         return _xbone_str;
     }
 
-    // XInput security string (index 4) needs a larger buffer (~90 chars)
-    if (output_mode == USB_OUTPUT_MODE_XINPUT && index == 4) {
-        static uint16_t _xinput_sec_str[96];
-        const char* sec_str = XINPUT_SECURITY_STRING;
-        uint8_t sec_len = strlen(sec_str);
-        if (sec_len > 95) sec_len = 95;
-        for (uint8_t i = 0; i < sec_len; i++) {
-            _xinput_sec_str[1 + i] = (uint8_t)sec_str[i];
+    // XInput strings handled separately: copyright symbol in manufacturer
+    // needs uint8_t cast, and security string (index 4) needs larger buffer
+    if (output_mode == USB_OUTPUT_MODE_XINPUT && index >= 1 && index <= 4) {
+        static uint16_t _xinput_str[96];  // Large enough for security string
+        const char* xinput_str = NULL;
+        switch (index) {
+            case 1: xinput_str = XINPUT_MANUFACTURER; break;
+            case 2: xinput_str = XINPUT_PRODUCT; break;
+            case 3: xinput_str = usb_serial_str; break;
+            case 4: xinput_str = XINPUT_SECURITY_STRING; break;
         }
-        _xinput_sec_str[0] = (TUSB_DESC_STRING << 8) | (2 * sec_len + 2);
-        return _xinput_sec_str;
+        uint8_t xinput_len = strlen(xinput_str);
+        if (xinput_len > 95) xinput_len = 95;
+        for (uint8_t i = 0; i < xinput_len; i++) {
+            _xinput_str[1 + i] = (uint8_t)xinput_str[i];
+        }
+        _xinput_str[0] = (TUSB_DESC_STRING << 8) | (2 * xinput_len + 2);
+        return _xinput_str;
     }
 
     static uint16_t _desc_str[32];
@@ -1864,6 +1871,9 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
 {
     if (output_mode == USB_OUTPUT_MODE_XBONE) {
         return tud_xbone_vendor_control_xfer_cb(rhport, stage, request);
+    }
+    if (output_mode == USB_OUTPUT_MODE_XINPUT) {
+        return tud_xinput_vendor_control_xfer_cb(rhport, stage, request);
     }
     return true;  // Accept by default for other modes
 }
