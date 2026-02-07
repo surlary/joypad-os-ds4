@@ -195,6 +195,6 @@ _Static_assert(sizeof(xinput_config_descriptor) == XINPUT_CONFIG_TOTAL_LEN,
 
 // String descriptors (match real Xbox 360 wired controller)
 #define XINPUT_MANUFACTURER  "\xa9Microsoft Corporation"
-#define XINPUT_PRODUCT       "Controller"
+#define XINPUT_PRODUCT       "Xbox 360 Controller"
 
 #endif // XINPUT_DESCRIPTORS_H
