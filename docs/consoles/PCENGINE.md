@@ -84,17 +84,54 @@ Supports up to 5 players via PCEngine multitap:
 
 ## Pin Configuration
 
-Standard PCEngine controller pinout:
+### PCEngine Controller Port (8-pin DIN)
+
 ```
 Pin 1: VCC (5V)
-Pin 2: D0
-Pin 3: D1
-Pin 4: D2
-Pin 5: D3
-Pin 6: SEL
-Pin 7: CLR
+Pin 2: D0  (Up/I)
+Pin 3: D1  (Right/II)
+Pin 4: D2  (Down/Select)
+Pin 5: D3  (Left/Run)
+Pin 6: SEL (Select — nibble toggle from console)
+Pin 7: CLR (Clear/OE — scan reset from console)
 Pin 8: GND
 ```
+
+> **Note:** Pin 7 is labeled **OE** (Output Enable) in some references and **CLR** (Clear) in others. They are the same signal.
+
+### Wiring — KB2040 (default)
+
+| PCE Pin | Signal | KB2040 GPIO |
+|---------|--------|-------------|
+| 1 | VCC (5V) | VBUS |
+| 2 | D0 | GP26 |
+| 3 | D1 | GP27 |
+| 4 | D2 | GP28 |
+| 5 | D3 | GP29 |
+| 6 | SEL | GP18 |
+| 7 | CLR/OE | GP19 |
+| 8 | GND | GND |
+
+### Wiring — Pico
+
+| PCE Pin | Signal | Pico GPIO |
+|---------|--------|-----------|
+| 1 | VCC (5V) | VBUS |
+| 2 | D0 | GP4 |
+| 3 | D1 | GP5 |
+| 4 | D2 | GP6 |
+| 5 | D3 | GP7 |
+| 6 | SEL | GP18 |
+| 7 | CLR/OE | GP19 |
+| 8 | GND | GND |
+
+### Code Variable Naming
+
+The source code uses legacy names for the input pins:
+- `DATAIN_PIN` (GP18) = **SEL** — the select/nibble toggle line
+- `CLKIN_PIN` (GP19) = **CLR/OE** — named "clock in" because `clock.pio` monitors its edges for scan timing
+
+See [PCEngine Protocol Reference](../protocols/PCENGINE.md) for full technical details.
 
 ## Multitap Details
 

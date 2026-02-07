@@ -58,13 +58,17 @@ The PCEngine controller port uses an **8-pin DIN connector**:
 | Pin | Name | Direction | Description |
 |-----|------|-----------|-------------|
 | 1 | VCC | - | +5V power supply |
-| 2 | D0 | Output (from controller) | Data bit 0 |
-| 3 | D1 | Output | Data bit 1 |
-| 4 | D2 | Output | Data bit 2 |
-| 5 | D3 | Output | Data bit 3 |
-| 6 | SEL | Input (to controller) | Select signal |
-| 7 | CLR | Input (to controller) | Clear/Enable signal |
+| 2 | D0 | Output (from controller) | Data bit 0 (active LOW) |
+| 3 | D1 | Output | Data bit 1 (active LOW) |
+| 4 | D2 | Output | Data bit 2 (active LOW) |
+| 5 | D3 | Output | Data bit 3 (active LOW) |
+| 6 | SEL | Input (to controller) | Select signal (nibble toggle) |
+| 7 | CLR | Input (to controller) | Clear/Enable signal (scan reset) |
 | 8 | GND | - | Ground |
+
+> **Naming note:** Pin 7 is called **CLR** (Clear) in this codebase because it resets the multitap scan to Player 1. Some references label it **OE** (Output Enable, active LOW) since it enables controller data output. They refer to the same signal — CLR/OE are interchangeable names for pin 7.
+>
+> In the source code, `DATAIN_PIN` (GP18) corresponds to **SEL** and `CLKIN_PIN` (GP19) corresponds to **CLR/OE**. The `CLKIN_PIN` name is historical — `clock.pio` monitors CLR edges to derive scan timing, so it functions as a clock source even though the signal is technically CLR/OE.
 
 ### Electrical Characteristics
 
@@ -731,14 +735,18 @@ Bit:  7     6       5   4   |  3    2    1    0
 
 ### Pin Assignments (Default KB2040)
 
-| Function | GPIO | Description |
-|----------|------|-------------|
-| DATAIN_PIN | 18 | SEL input |
-| CLKIN_PIN | 19 | CLR input |
-| OUTD0_PIN | 26 | Data bit 0 output |
-| OUTD1_PIN | 27 | Data bit 1 output |
-| OUTD2_PIN | 28 | Data bit 2 output |
-| OUTD3_PIN | 29 | Data bit 3 output |
+| Function | GPIO | PCE Pin | Signal | Description |
+|----------|------|---------|--------|-------------|
+| DATAIN_PIN | 18 | 6 | SEL | Select input (nibble toggle from console) |
+| CLKIN_PIN | 19 | 7 | CLR/OE | Clear/Output Enable input (scan reset from console) |
+| OUTD0_PIN | 26 | 2 | D0 | Data bit 0 output (active LOW) |
+| OUTD1_PIN | 27 | 3 | D1 | Data bit 1 output (active LOW) |
+| OUTD2_PIN | 28 | 4 | D2 | Data bit 2 output (active LOW) |
+| OUTD3_PIN | 29 | 5 | D3 | Data bit 3 output (active LOW) |
+| VBUS | — | 1 | VCC | +5V power |
+| GND | — | 8 | GND | Ground |
+
+> For Pico builds, D0-D3 use GP4-GP7 instead of GP26-GP29.
 
 ### PIO Resource Usage
 
