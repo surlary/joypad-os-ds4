@@ -44,6 +44,9 @@ static volatile uint16_t log_tail = 0;  // Read position
 
 static void log_stdio_out_chars(const char *buf, int len)
 {
+    // Skip ring buffer writes when not streaming — zero overhead on normal path
+    if (!protocol_ctx.log_streaming) return;
+
     for (int i = 0; i < len; i++) {
         uint16_t next = (log_head + 1) % LOG_BUF_SIZE;
         if (next == log_tail) {
