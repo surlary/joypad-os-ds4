@@ -24,8 +24,12 @@
 //
 // KB2040 uses GPIO 2/3 for convenience. WS2812_PIN=17 avoids conflict.
 // TODO: Make configurable via web config per board.
+#ifndef MAPLE_PIN1
 #define MAPLE_PIN1      2    // Data line A (Dreamcast controller Pin 1)
+#endif
+#ifndef MAPLE_PIN5
 #define MAPLE_PIN5      3    // Data line B (Dreamcast controller Pin 5)
+#endif
 
 // ============================================================================
 // MAPLE BUS PROTOCOL CONSTANTS

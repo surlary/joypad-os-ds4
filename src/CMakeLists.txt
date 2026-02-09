@@ -475,6 +475,30 @@ joypad_target_common(joypad_dc)
 joypad_add_btstack(joypad_dc)
 pico_generate_pio_header(joypad_dc ${CMAKE_CURRENT_LIST_DIR}/native/device/dreamcast/maple.pio)
 
+# --- Dreamcast (RP2040-Zero) ---
+# USB4Maple-compatible pinout: GPIO 14/15 for Maple Bus
+add_executable(joypad_dc_rp2040zero)
+target_compile_definitions(joypad_dc_rp2040zero PRIVATE
+    CONFIG_DC=1 CONFIG_USB_HOST=1 CONFIG_DC_CORE1_TX=1
+    MAPLE_PIN1=14
+    MAPLE_PIN5=15
+    WS2812_PIN=16
+    USE_BOOTSEL_BUTTON=1
+)
+target_sources(joypad_dc_rp2040zero PUBLIC ${COMMON_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast/dreamcast_device.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast/maple_state_machine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2dc/app.c
+)
+target_include_directories(joypad_dc_rp2040zero PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2dc
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast
+)
+target_link_libraries(joypad_dc_rp2040zero PRIVATE ${COMMON_LIBRARIES} hardware_dma)
+joypad_target_common(joypad_dc_rp2040zero)
+joypad_add_btstack(joypad_dc_rp2040zero)
+pico_generate_pio_header(joypad_dc_rp2040zero ${CMAKE_CURRENT_LIST_DIR}/native/device/dreamcast/maple.pio)
+
 # --- NEOGEO ---
 add_executable(joypad_neogeo)
 target_compile_definitions(joypad_neogeo PRIVATE CONFIG_NEOGEO=1)
