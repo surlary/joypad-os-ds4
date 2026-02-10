@@ -897,11 +897,13 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             uint8_t adv_len = gap_event_advertising_report_get_data_length(packet);
             const uint8_t *adv_data = gap_event_advertising_report_get_data(packet);
 
-            // Parse name and manufacturer data from advertising data
+            // Parse name, appearance, and manufacturer data from advertising data
             char name[32] = {0};
             bool is_switch2 = false;
             uint16_t sw2_vid = 0;
             uint16_t sw2_pid = 0;
+            uint16_t appearance = 0;
+            bool has_hid_uuid = false;
 
             ad_context_t context;
             for (ad_iterator_init(&context, adv_len, adv_data); ad_iterator_has_more(&context); ad_iterator_next(&context)) {
@@ -913,6 +915,23 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                      type == BLUETOOTH_DATA_TYPE_SHORTENED_LOCAL_NAME) && len < sizeof(name)) {
                     memcpy(name, data, len);
                     name[len] = 0;
+                }
+
+                // Parse GAP Appearance (2 bytes, little-endian)
+                if (type == BLUETOOTH_DATA_TYPE_APPEARANCE && len >= 2) {
+                    appearance = data[0] | (data[1] << 8);
+                }
+
+                // Check for HID service UUID (0x1812) in service class lists
+                if ((type == BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS ||
+                     type == BLUETOOTH_DATA_TYPE_INCOMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS) && len >= 2) {
+                    for (int i = 0; i + 1 < len; i += 2) {
+                        uint16_t uuid16 = data[i] | (data[i + 1] << 8);
+                        if (uuid16 == 0x1812) {  // HID Service
+                            has_hid_uuid = true;
+                            break;
+                        }
+                    }
                 }
 
                 // Check for Switch 2 controller via manufacturer data
@@ -952,11 +971,25 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             bool is_nintendo = (strstr(name, "Pro Controller") != NULL ||
                                strstr(name, "Joy-Con") != NULL);
             bool is_stadia = (strstr(name, "Stadia") != NULL);
-            bool is_controller = is_xbox || is_nintendo || is_stadia || is_switch2;
+            bool is_known_controller = is_xbox || is_nintendo || is_stadia || is_switch2;
+
+            // Generic BLE gamepad detection (fallback for unknown controllers)
+            // Only triggers when no specific driver matched by name/manufacturer.
+            // Uses GAP Appearance: 0x03C3 = Joystick, 0x03C4 = Gamepad
+            // Also accepts HID service UUID (0x1812) with gamepad/joystick appearance.
+            // Does NOT match on HID UUID alone to avoid connecting to keyboards/mice.
+            bool is_generic_ble_gamepad = false;
+            if (!is_known_controller && (appearance == 0x03C3 || appearance == 0x03C4)) {
+                is_generic_ble_gamepad = true;
+                printf("[BTSTACK_HOST] Generic BLE gamepad detected: \"%s\" appearance=0x%04X hid_uuid=%d\n",
+                       name, appearance, has_hid_uuid);
+            }
+
+            bool is_controller = is_known_controller || is_generic_ble_gamepad;
 
             // Auto-connect to supported BLE controllers
             if (hid_state.state == BLE_STATE_SCANNING && is_controller) {
-                if (is_xbox || is_stadia || is_switch2) {
+                if (is_xbox || is_stadia || is_switch2 || is_generic_ble_gamepad) {
                     printf("[BTSTACK_HOST] BLE controller: %02X:%02X:%02X:%02X:%02X:%02X name=\"%s\"\n",
                            addr[5], addr[4], addr[3], addr[2], addr[1], addr[0], name);
                     // Determine device name from type and PID
@@ -971,8 +1004,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                         }
                     } else if (is_xbox) {
                         type_str = "Xbox BLE";
-                    } else {
+                    } else if (is_stadia) {
                         type_str = "Stadia";
+                    } else {
+                        type_str = "Generic BLE Gamepad";
                     }
                     printf("[BTSTACK_HOST] Connecting to %s...\n", type_str);
                     // Use advertised name if available, otherwise use device type as fallback
