@@ -1877,13 +1877,17 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
         return;
     }
 
-    // PS3 output report: delegate to mode interface
+    // PS3 output/feature reports: delegate to mode interface
     if (output_mode == USB_OUTPUT_MODE_PS3) {
         const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS3];
         if (mode && mode->handle_output) {
             mode->handle_output(report_id, buffer, bufsize);
-            return;
         }
+        // Also handle feature reports for auth handshake
+        if (report_type == HID_REPORT_TYPE_FEATURE) {
+            ps3_mode_set_feature_report(report_id, buffer, bufsize);
+        }
+        return;
     }
 
     // PS4 output report: delegate to mode interface

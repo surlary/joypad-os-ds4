@@ -7,6 +7,7 @@
 #include "../usbd.h"
 #include "descriptors/ps3_descriptors.h"
 #include "core/buttons.h"
+#include "pico/unique_id.h"
 #include <string.h>
 
 // ============================================================================
@@ -16,6 +17,8 @@
 static ps3_in_report_t ps3_report;
 static ps3_out_report_t ps3_output;
 static bool ps3_output_available = false;
+static uint8_t ps3_ef_byte = 0;  // Mode byte echoed from SET_REPORT(0xEF)
+static ps3_pairing_info_t ps3_pairing = {0};  // Pairing info with BT addresses
 
 // ============================================================================
 // MODE INTERFACE IMPLEMENTATION
@@ -26,6 +29,22 @@ static void ps3_mode_init(void)
     ps3_init_report(&ps3_report);
     memset(&ps3_output, 0, sizeof(ps3_out_report_t));
     ps3_output_available = false;
+    ps3_ef_byte = 0;
+
+    // Generate plausible BT addresses from RP2040 unique board ID
+    memset(&ps3_pairing, 0, sizeof(ps3_pairing));
+    pico_unique_board_id_t board_id;
+    pico_get_unique_board_id(&board_id);
+    // Device address: bytes 0-5 of board ID
+    ps3_pairing.device_address[0] = 0x00;  // Leading zero
+    for (int i = 0; i < 6; i++) {
+        ps3_pairing.device_address[1 + i] = board_id.id[i];
+    }
+    // Host address: bytes 2-7 XOR'd for differentiation
+    ps3_pairing.host_address[0] = 0x00;  // Leading zero
+    for (int i = 0; i < 6; i++) {
+        ps3_pairing.host_address[1 + i] = board_id.id[i] ^ 0xAA;
+    }
 }
 
 static bool ps3_mode_is_ready(void)
@@ -188,6 +207,13 @@ static bool ps3_mode_get_feedback(output_feedback_t* fb)
     return true;
 }
 
+void ps3_mode_set_feature_report(uint8_t report_id, const uint8_t* buffer, uint16_t bufsize)
+{
+    if (report_id == PS3_REPORT_ID_FEATURE_EF && bufsize > 6) {
+        ps3_ef_byte = buffer[6];
+    }
+}
+
 static uint16_t ps3_mode_get_report(uint8_t report_id, hid_report_type_t report_type,
                                      uint8_t* buffer, uint16_t reqlen)
 {
@@ -203,19 +229,27 @@ static uint16_t ps3_mode_get_report(uint8_t report_id, hid_report_type_t report_
             memcpy(buffer, ps3_feature_01, len);
             return len;
 
-        case PS3_REPORT_ID_PAIRING: {
-            // Pairing info (0xF2) - return dummy BT addresses
-            static ps3_pairing_info_t pairing = {0};
-            len = sizeof(pairing);
+        case PS3_REPORT_ID_PAIRING:
+            len = sizeof(ps3_pairing);
             if (reqlen < len) len = reqlen;
-            memcpy(buffer, &pairing, len);
+            memcpy(buffer, &ps3_pairing, len);
             return len;
-        }
 
         case PS3_REPORT_ID_FEATURE_EF:
             len = sizeof(ps3_feature_ef);
             if (reqlen < len) len = reqlen;
             memcpy(buffer, ps3_feature_ef, len);
+            buffer[6] = ps3_ef_byte;  // Echo mode byte from SET_REPORT
+            return len;
+
+        case PS3_REPORT_ID_FEATURE_F5:
+            len = sizeof(ps3_feature_f5);
+            if (reqlen < len) len = reqlen;
+            memcpy(buffer, ps3_feature_f5, len);
+            // Inject host BT address at offsets 1-6
+            for (int i = 0; i < 6; i++) {
+                buffer[1 + i] = ps3_pairing.host_address[1 + i];
+            }
             return len;
 
         case PS3_REPORT_ID_FEATURE_F7:
@@ -228,6 +262,7 @@ static uint16_t ps3_mode_get_report(uint8_t report_id, hid_report_type_t report_
             len = sizeof(ps3_feature_f8);
             if (reqlen < len) len = reqlen;
             memcpy(buffer, ps3_feature_f8, len);
+            buffer[6] = ps3_ef_byte;  // Echo mode byte from SET_REPORT
             return len;
 
         default:
