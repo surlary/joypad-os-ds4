@@ -293,8 +293,6 @@ static bool sinput_mode_send_report(uint8_t player_index,
 
 static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, uint16_t len)
 {
-    printf("[sinput] handle_output: report_id=%d len=%d data[0]=%d\n", report_id, len, data[0]);
-
     // Handle report ID in buffer (interrupt OUT endpoint case)
     // When report_id=0, the actual report ID may be the first byte of data
     if (report_id == 0 && len > 0 && data[0] == SINPUT_REPORT_ID_OUTPUT) {
@@ -302,18 +300,14 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
         report_id = data[0];
         data = data + 1;
         len = len - 1;
-        printf("[sinput] Extracted report_id from buffer: %d\n", report_id);
     }
 
     // Handle output report (rumble, LEDs)
     if (report_id != SINPUT_REPORT_ID_OUTPUT || len < 2) {
-        printf("[sinput] Ignoring: expected report_id=%d\n", SINPUT_REPORT_ID_OUTPUT);
         return;
     }
 
     uint8_t command = data[0];
-    printf("[sinput] command=%d data=[%d,%d,%d,%d,%d,%d]\n",
-           command, data[0], data[1], data[2], data[3], data[4], data[5]);
 
     switch (command) {
         case SINPUT_CMD_HAPTIC:
@@ -331,7 +325,6 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
                     rumble_left = new_left;
                     rumble_right = new_right;
                     rumble_dirty = true;
-                    printf("[sinput] Rumble changed: L=%d R=%d\n", rumble_left, rumble_right);
                 }
             }
             break;
@@ -343,14 +336,12 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
                 if (new_led != player_led) {
                     player_led = new_led;
                     player_led_dirty = true;
-                    printf("[sinput] Player LED changed: %d\n", player_led);
                 }
             }
             break;
 
         case SINPUT_CMD_FEATURES:
             // Feature request - queue a response
-            printf("[sinput] Feature request received\n");
             feature_request_pending = true;
             break;
 
@@ -362,7 +353,6 @@ static void sinput_mode_handle_output(uint8_t report_id, const uint8_t* data, ui
                     rgb_g = data[2];
                     rgb_b = data[3];
                     rgb_dirty = true;
-                    printf("[sinput] RGB LED changed: R=%d G=%d B=%d\n", rgb_r, rgb_g, rgb_b);
                 }
             }
             break;
@@ -506,7 +496,6 @@ static void sinput_mode_task(void)
     feature_response[22] = board_id.id[6];
     feature_response[23] = board_id.id[7];
 
-    printf("[sinput] Sending feature response (24 bytes)\n");
     tud_hid_n_report(ITF_NUM_HID_GAMEPAD, SINPUT_REPORT_ID_FEATURES, feature_response, sizeof(feature_response));
 }
 
