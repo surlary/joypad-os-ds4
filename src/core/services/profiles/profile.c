@@ -483,8 +483,7 @@ void profile_check_switch_combo(uint32_t buttons)
     output_target_t output = router_get_primary_output();
     if (output == OUTPUT_TARGET_NONE) return;
 
-    uint8_t player_count = get_player_count ? get_player_count() : 0;
-    if (player_count == 0) return;  // No controllers connected
+    uint8_t player_count = get_player_count ? get_player_count() : 1;
 
     // Check button states (buttons are active-high: 1 = pressed)
     bool select_held = ((buttons & JP_BUTTON_S1) != 0);
@@ -551,21 +550,15 @@ void profile_check_switch_combo(uint32_t buttons)
 
     // D-pad Up - cycle profile forward
     if (trigger_up) {
-        uint8_t count = profile_get_count(output);
-        if (count > 1) {
-            profile_cycle_next(output);
-            initial_trigger_done = true;
-        }
+        profile_cycle_next(output);
+        initial_trigger_done = true;
     }
     dpad_up_was_pressed = dpad_up_pressed;
 
     // D-pad Down - cycle profile backward
     if (trigger_down && !trigger_up) {  // Don't trigger both directions
-        uint8_t count = profile_get_count(output);
-        if (count > 1) {
-            profile_cycle_prev(output);
-            initial_trigger_done = true;
-        }
+        profile_cycle_prev(output);
+        initial_trigger_done = true;
     }
     dpad_down_was_pressed = dpad_down_pressed;
 
