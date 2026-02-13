@@ -181,6 +181,20 @@ NEOGEO AES pad mapping to KOF style in controllers:
   * **Basic Protection:** To mitigate electrical risks, add a **1N4148 diode** with the cathode (the stripe) facing the RP2040.
   * **Maximum Safety:** To eliminate all risks, it is recommended to use level shifters such as the **TXS0108E** (bidirectional) or the **74LVC245A** (unidirectional).
 
+### RP2040 Zero Wiring Reference
+
+It is possible to connect the RP2040 Zero directly to a DB15 connector by taking advantage of the board design.
+
+**Installation Steps:**
+
+ * Solder pins 10 through 15 of the DB15 directly to GPIO pins 9 through 14 on the bottom of the RP2040 Zero. To minimize risk, solder to the base of the DB15 pins; it is possible to solder in the center, but it requires special care.
+ 
+ * Connect the remaining GPIOs, along with the +5V and GND lines, using wires as shown in the front and back reference images.
+
+| Front | Back |
+| :---: | :---: |
+| ![USB-2-NEOGEO RP2040 Zero Front](../images/usb2neogeo_rp2040_zero_front.png) | ![USB-2-NEOGEO RP2040 Zero Back](../images/usb2neogeo_rp2040_zero_back.png) |
+
 ## Technical Details
 
 ### Latency Testing
