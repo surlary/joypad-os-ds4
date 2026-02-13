@@ -20,7 +20,7 @@ concurrency:
 jobs:
   deploy:
     environment:
-      name: Docs
+      name: github-pages
       url: https://docs.joypad.ai
     runs-on: ubuntu-latest
     steps:
