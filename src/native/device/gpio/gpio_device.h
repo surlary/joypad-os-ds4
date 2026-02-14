@@ -18,12 +18,12 @@
 // ============================================================================
 
 // GPIO
-#ifndef GPIO_MASK 
-#define GPIO_MASK(pin) ((pin < 0) ? 0u : (1u << (pin)))
+#ifndef GPIO_DISABLED
+#define GPIO_DISABLED 0xFF
 #endif
 
-#ifndef GPIO_DISABLED 
-#define GPIO_DISABLED (-1)
+#ifndef GPIO_MASK
+#define GPIO_MASK(pin) ((pin >= 30) ? 0u : (1u << (pin)))
 #endif
 
 // Initialize all pins to disabled
@@ -120,7 +120,7 @@ typedef struct {
 
 // Function declarations
 void gpio_device_init(void);
-void gpio_devide_task(void);
+void gpio_device_task(void);
 void __not_in_flash_func(core1_task)(void);
 void gpio_device_init_pins(gpio_device_config_t* config, bool active_high);
 

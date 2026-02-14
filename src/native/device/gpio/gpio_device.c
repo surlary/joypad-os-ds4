@@ -227,7 +227,7 @@ void gpio_device_init_pins(gpio_device_config_t* config, bool active_high){
 
 // Task loop — handles non-latency-critical work (combo detection, cheat codes).
 // GPIO updates are now handled by the tap callback above.
-void gpio_devide_task()
+void gpio_device_task()
 {
   static uint32_t last_buttons = 0;
   bool had_update = false;
@@ -277,7 +277,7 @@ const OutputInterface gpio_output_interface = {
     .target = OUTPUT_TARGET_GPIO,
     .init = gpio_device_init,
     .core1_task = NULL,
-    .task = gpio_devide_task,  // GPIO needs periodic scan detection task
+    .task = gpio_device_task,  // GPIO needs periodic scan detection task
     .get_rumble = NULL,
     .get_player_led = NULL,
     .get_profile_count = gpio_get_profile_count,

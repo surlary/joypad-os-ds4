@@ -36,8 +36,8 @@
 // System Buttons
 #define GPIO_BUTTON_S1     JP_BUTTON_S1
 #define GPIO_BUTTON_S2     JP_BUTTON_S2
-#define GPIO_BUTTON_S1     JP_BUTTON_A1
-#define GPIO_BUTTON_S2     JP_BUTTON_A2
+#define GPIO_BUTTON_A1     JP_BUTTON_A1
+#define GPIO_BUTTON_A2     JP_BUTTON_A2
 
 // Extra Buttons
 #define GPIO_BUTTON_L3     JP_BUTTON_L3
