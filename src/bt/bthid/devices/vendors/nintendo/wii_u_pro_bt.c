@@ -271,6 +271,10 @@ static bool wii_u_init(bthid_device_t* device)
             wii_u_data[i].event.instance = 0;
             wii_u_data[i].event.button_count = 14;
 
+            // Ensure VID/PID are set (Wiimote-family lacks PnP SDP)
+            if (device->vendor_id == 0) device->vendor_id = 0x057E;
+            if (device->product_id == 0) device->product_id = 0x0330;
+
             device->driver_data = &wii_u_data[i];
 
             // Defer init commands to task() to avoid ACL buffer full errors
