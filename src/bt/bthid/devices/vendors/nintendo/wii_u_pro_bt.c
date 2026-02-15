@@ -376,6 +376,11 @@ static void wii_u_process_report(bthid_device_t* device, const uint8_t* data, ui
         wii->event.analog[ANALOG_RX] = scale_stick(rx);
         wii->event.analog[ANALOG_RY] = 255 - scale_stick(ry); // Invert Y
 
+        // Battery: ext[10] bits 6-4 = level (0-4, 4=full), bit 3 = USB (active-low), bit 2 = charging (active-low)
+        uint8_t battery_raw = (ext[10] >> 4) & 0x07;
+        wii->event.battery_level = (battery_raw >= 4) ? 100 : battery_raw * 25;
+        wii->event.battery_charging = (ext[10] & 0x04) == 0;
+
         router_submit_input(&wii->event);
 
     } else if (report_id == WIIU_REPORT_EXT_16 && len >= 22) {
@@ -448,6 +453,11 @@ static void wii_u_process_report(bthid_device_t* device, const uint8_t* data, ui
         wii->event.analog[ANALOG_RX] = scale_stick(rx);
         wii->event.analog[ANALOG_RY] = 255 - scale_stick(ry); // Invert Y
 
+        // Battery: ext[10] bits 6-4 = level (0-4, 4=full), bit 3 = USB (active-low), bit 2 = charging (active-low)
+        uint8_t battery_raw = (ext[10] >> 4) & 0x07;
+        wii->event.battery_level = (battery_raw >= 4) ? 100 : battery_raw * 25;
+        wii->event.battery_charging = (ext[10] & 0x04) == 0;
+
         router_submit_input(&wii->event);
 
     } else if (report_id == WIIU_REPORT_EXT_19 && len >= 22) {
@@ -496,6 +506,11 @@ static void wii_u_process_report(bthid_device_t* device, const uint8_t* data, ui
         wii->event.analog[ANALOG_LY] = 255 - scale_stick(ly);
         wii->event.analog[ANALOG_RX] = scale_stick(rx);
         wii->event.analog[ANALOG_RY] = 255 - scale_stick(ry);
+
+        // Battery: ext[10] bits 6-4 = level (0-4, 4=full), bit 3 = USB (active-low), bit 2 = charging (active-low)
+        uint8_t battery_raw = (ext[10] >> 4) & 0x07;
+        wii->event.battery_level = (battery_raw >= 4) ? 100 : battery_raw * 25;
+        wii->event.battery_charging = (ext[10] & 0x04) == 0;
 
         router_submit_input(&wii->event);
 
