@@ -3331,6 +3331,13 @@ static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8
                         }
                     }
                 } else {
+                    // Set default VID/PID from profile if available
+                    if (conn->vendor_id == 0 && conn->profile && conn->profile->default_vid) {
+                        conn->vendor_id = conn->profile->default_vid;
+                        printf("[BTSTACK_HOST] Set VID=0x%04X from %s profile\n",
+                               conn->vendor_id, conn->profile->name);
+                    }
+
                     // For non-Wiimote devices, query SDP for VID/PID if we don't have it
                     if (conn->vendor_id == 0 && conn->product_id == 0) {
                         // Store pending info for SDP callback

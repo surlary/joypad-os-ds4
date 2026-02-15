@@ -54,6 +54,7 @@ const bt_device_profile_t BT_PROFILE_DS3 = {
     .hid_mode = BT_HID_MODE_REPORT,
     .pin_type = BT_PIN_NONE,
     .classic_only = true,
+    .default_vid = 0x054C,
 };
 
 const bt_device_profile_t BT_PROFILE_SONY = {
@@ -63,6 +64,7 @@ const bt_device_profile_t BT_PROFILE_SONY = {
     .hid_mode = BT_HID_MODE_REPORT,
     .pin_type = BT_PIN_NONE,
     .classic_only = true,
+    .default_vid = 0x054C,
 };
 
 const bt_device_profile_t BT_PROFILE_SWITCH = {

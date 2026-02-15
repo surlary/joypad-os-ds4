@@ -197,7 +197,8 @@ static void ds5_send_output(bthid_device_t* device, uint8_t rumble_left, uint8_t
     // DS5 BT output report - matches Linux kernel hid-playstation.c dualsense_output_report_common
     // Report structure: report_id(1) + seq_tag(1) + tag(1) + common(47) + reserved(24) + crc(4) = 78 bytes
     // Buffer: 0xA2 header + 78-byte report = 79 bytes total
-    uint8_t buf[79];
+    // Static: BTstack stores pointer to report data for deferred L2CAP send
+    static uint8_t buf[79];
     memset(buf, 0, sizeof(buf));
 
     // BT HID header

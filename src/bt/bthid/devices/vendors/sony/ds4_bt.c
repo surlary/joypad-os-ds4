@@ -114,6 +114,11 @@ static ds4_bt_data_t ds4_data[BTHID_MAX_DEVICES];
 // HELPER FUNCTIONS
 // ============================================================================
 
+// Static buffer for DS4 output report — BTstack's hid_host_send_set_report
+// stores a pointer to report data for deferred L2CAP send, so the buffer
+// must remain valid until the CAN_SEND_NOW callback fires.
+static uint8_t ds4_output_buf[79];
+
 static void ds4_send_output(bthid_device_t* device, uint8_t rumble_left, uint8_t rumble_right,
                             uint8_t r, uint8_t g, uint8_t b)
 {
@@ -122,22 +127,22 @@ static void ds4_send_output(bthid_device_t* device, uint8_t rumble_left, uint8_t
 
     // DS4 BT output report - must use SET_REPORT on control channel
     // Format: [SET_REPORT header][Report ID 0x11][flags][data...]
-    uint8_t buf[79];
-    memset(buf, 0, sizeof(buf));
+    // This also triggers enhanced report mode (0x11) on first send.
+    memset(ds4_output_buf, 0, sizeof(ds4_output_buf));
 
-    buf[0] = 0x52;  // SET_REPORT | Output (0x50 | 0x02)
-    buf[1] = 0x11;  // Report ID
-    buf[2] = 0x80;  // Flags (BT)
-    buf[3] = 0x00;
-    buf[4] = 0xFF;  // Enable rumble+LED
+    ds4_output_buf[0] = 0x52;  // SET_REPORT | Output (0x50 | 0x02)
+    ds4_output_buf[1] = 0x11;  // Report ID
+    ds4_output_buf[2] = 0x80;  // Flags (BT)
+    ds4_output_buf[3] = 0x00;
+    ds4_output_buf[4] = 0xFF;  // Enable rumble+LED
 
-    buf[7] = rumble_right;  // High frequency motor
-    buf[8] = rumble_left;   // Low frequency motor
-    buf[9] = r;
-    buf[10] = g;
-    buf[11] = b;
+    ds4_output_buf[7] = rumble_right;  // High frequency motor
+    ds4_output_buf[8] = rumble_left;   // Low frequency motor
+    ds4_output_buf[9] = r;
+    ds4_output_buf[10] = g;
+    ds4_output_buf[11] = b;
 
-    bt_send_control(device->conn_index, buf, sizeof(buf));
+    bt_send_control(device->conn_index, ds4_output_buf, sizeof(ds4_output_buf));
 
     // Update cached state
     ds4->rumble_left = rumble_left;
@@ -145,14 +150,6 @@ static void ds4_send_output(bthid_device_t* device, uint8_t rumble_left, uint8_t
     ds4->led_r = r;
     ds4->led_g = g;
     ds4->led_b = b;
-}
-
-static void ds4_enable_sixaxis(bthid_device_t* device)
-{
-    // Send GET_REPORT Feature to enable full reports
-    // buf[0] = 0x43 (GET_REPORT | Feature), buf[1] = 0x02 (report ID)
-    uint8_t buf[2] = {0x43, 0x02};
-    bt_send_control(device->conn_index, buf, sizeof(buf));
 }
 
 // ============================================================================
@@ -347,15 +344,16 @@ static void ds4_task(bthid_device_t* device)
 
     // State machine for activation with delays
     switch (ds4->activation_state) {
-        case 0:  // Send enable_sixaxis
-            ds4_enable_sixaxis(device);
-            ds4->activation_state = 1;
+        case 0:  // Wait 100ms after init before sending first output
             ds4->activation_time = now;
+            ds4->activation_state = 1;
             break;
 
-        case 1:  // Wait 100ms then send initial LED
+        case 1:  // Send initial LED output (also triggers enhanced report mode)
             if (now - ds4->activation_time >= 100) {
                 // Set initial LED color (blue for player 1)
+                // First SET_REPORT Output triggers DS4 to switch from basic (0x01)
+                // to enhanced (0x11) report mode with motion/touchpad data.
                 ds4_send_output(device, 0, 0, 0, 0, 64);
                 ds4->activation_state = 2;
             }

@@ -181,7 +181,9 @@ static bool ds3_init(bthid_device_t* device)
 // Send LED/rumble output report to DS3
 static void ds3_send_output(bthid_device_t* device, uint8_t leds, uint8_t rumble_left, uint8_t rumble_right)
 {
-    ds3_bt_output_report_t report = {0};
+    // Static: BTstack stores pointer to report data for deferred L2CAP send
+    static ds3_bt_output_report_t report;
+    memset(&report, 0, sizeof(report));
 
     report.transaction_type = 0x52;  // SET_REPORT | Output
     report.report_id = 0x01;
