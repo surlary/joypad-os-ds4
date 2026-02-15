@@ -11,7 +11,7 @@
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -281,7 +281,7 @@ static bool switch_init(bthid_device_t* device)
 
             // Start init state machine — commands sent from task()
             switch_data[i].init_state = SWITCH_STATE_WAIT_READY;
-            switch_data[i].init_time = to_ms_since_boot(get_absolute_time());
+            switch_data[i].init_time = platform_time_ms();
 
             switch_data[i].event.type = INPUT_TYPE_GAMEPAD;
             switch_data[i].event.transport = INPUT_TRANSPORT_BT_CLASSIC;
@@ -395,7 +395,7 @@ static void switch_task(bthid_device_t* device)
     switch_bt_data_t* sw = (switch_bt_data_t*)device->driver_data;
     if (!sw) return;
 
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
 
     switch (sw->init_state) {
         case SWITCH_STATE_WAIT_READY:

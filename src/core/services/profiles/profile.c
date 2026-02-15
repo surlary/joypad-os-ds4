@@ -4,7 +4,7 @@
 // Supports per-output-target profile sets with shared fallback.
 
 #include "profile.h"
-#include "pico/stdlib.h"
+#include "platform/platform.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -403,7 +403,7 @@ void profile_check_player_switch_combo(uint8_t player_index, uint32_t buttons)
     }
 
     // Select is held
-    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    uint32_t current_time = platform_time_ms();
 
     if (!combo->p_select_was_held) {
         combo->p_select_hold_start = current_time;
@@ -505,7 +505,7 @@ void profile_check_switch_combo(uint32_t buttons)
     }
 
     // Select is held
-    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    uint32_t current_time = platform_time_ms();
 
     if (!select_was_held) {
         // Select just pressed - start timer

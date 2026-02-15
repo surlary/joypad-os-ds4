@@ -12,7 +12,7 @@
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -370,7 +370,7 @@ static void ds4_task(bthid_device_t* device)
     ds4_bt_data_t* ds4 = (ds4_bt_data_t*)device->driver_data;
     if (!ds4) return;
 
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
 
     // State machine for activation with delays
     switch (ds4->activation_state) {

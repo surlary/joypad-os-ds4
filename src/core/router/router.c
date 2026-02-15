@@ -5,6 +5,7 @@
 // Replaces console-specific post_input_event() with unified routing.
 
 #include "router.h"
+#include "platform/platform.h"
 #include "core/services/players/manager.h"
 #include <string.h>
 #include <stdio.h>

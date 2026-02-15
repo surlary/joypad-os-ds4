@@ -57,7 +57,6 @@ static bool xbox_ble_match(const char* device_name, const uint8_t* class_of_devi
                            uint16_t vendor_id, uint16_t product_id, bool is_ble)
 {
     (void)class_of_device;
-    (void)vendor_id;
     (void)product_id;
 
     // Only match BLE connections — Classic BT Xbox controllers use xbox_bt driver
@@ -65,11 +64,16 @@ static bool xbox_ble_match(const char* device_name, const uint8_t* class_of_devi
         return false;
     }
 
+    // VID match — Microsoft = 0x045E (from GATT DIS PnP ID, available after connection)
+    if (vendor_id == 0x045E) {
+        return true;
+    }
+
     if (!device_name) {
         return false;
     }
 
-    // Match known Xbox BLE controller names
+    // Match known Xbox BLE controller names (fallback for initial connection before DIS)
     if (strstr(device_name, "Xbox Wireless Controller") != NULL) {
         return true;
     }

@@ -121,8 +121,8 @@ static const bt_device_name_entry_t name_table[] = {
 // ============================================================================
 
 const bt_device_profile_t* bt_device_lookup(const char* name, uint16_t company_id) {
-    // Company ID match (Switch 2 — no name in advertising)
-    if (company_id == 0x0553) {
+    // Company ID match — identifies devices from BLE manufacturer-specific advertising data
+    if (company_id == 0x0553) {  // Nintendo (Switch 2)
         return &BT_PROFILE_SWITCH2;
     }
 

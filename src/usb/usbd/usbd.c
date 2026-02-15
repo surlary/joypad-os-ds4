@@ -45,9 +45,7 @@
 #endif
 #include "tusb.h"
 #include "device/usbd_pvt.h"
-#include "pico/unique_id.h"
-#include "hardware/watchdog.h"
-#include "hardware/gpio.h"
+#include "platform/platform.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -362,9 +360,15 @@ usb_output_mode_t usbd_get_mode(void)
 // Helper to flush debug output over CDC
 static void flush_debug_output(void)
 {
+#ifdef PLATFORM_ESP32
+    tud_task_ext(1, false);
+    platform_sleep_ms(20);
+    tud_task_ext(1, false);
+#else
     tud_task();
-    sleep_ms(20);
+    platform_sleep_ms(20);
     tud_task();
+#endif
 }
 
 bool usbd_set_mode(usb_output_mode_t mode)
@@ -438,13 +442,12 @@ bool usbd_set_mode(usb_output_mode_t mode)
     output_mode = mode;
 
     // Brief delay to allow flash write to complete
-    sleep_ms(50);
+    platform_sleep_ms(50);
 
     // Trigger device reset to re-enumerate with new descriptors
     printf("[usbd] Resetting device for re-enumeration...\n");
     flush_debug_output();
-    watchdog_enable(100, false);  // Reset in 100ms
-    while(1);  // Wait for watchdog reset
+    platform_reboot();
 
     return true;  // Never reached
 }
@@ -592,8 +595,8 @@ void usbd_init(void)
     build_config_descriptors();
 
     // Get unique board ID for USB serial number (first 12 chars)
-    char full_id[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1];
-    pico_get_unique_board_id_string(full_id, sizeof(full_id));
+    char full_id[17];  // Up to 8 bytes * 2 hex chars + null
+    platform_get_serial(full_id, sizeof(full_id));
     memcpy(usb_serial_str, full_id, USB_SERIAL_LEN);
     usb_serial_str[USB_SERIAL_LEN] = '\0';
     printf("[usbd] Serial: %s\n", usb_serial_str);
@@ -722,7 +725,13 @@ void usbd_init(void)
 void usbd_task(void)
 {
     // TinyUSB device task - runs from core0 main loop
+    // On ESP32 (FreeRTOS), tud_task() blocks forever (UINT32_MAX timeout).
+    // Use tud_task_ext with short timeout so the main loop keeps running.
+#ifdef PLATFORM_ESP32
+    tud_task_ext(1, false);
+#else
     tud_task();
+#endif
 
     switch (output_mode) {
         case USB_OUTPUT_MODE_XBOX_ORIGINAL: {
@@ -1411,8 +1420,19 @@ const OutputInterface usbd_output_interface = {
 // INTERFACE AND ENDPOINT NUMBERS
 // ============================================================================
 
-// Interface numbers (SInput composite: 3 HID + CDC)
+// Interface numbers (SInput composite: 3 HID + CDC on RP2040, 1 HID + CDC on ESP32)
 // HID interface numbers are defined in usbd.h (ITF_NUM_HID_GAMEPAD=0, KEYBOARD=1, MOUSE=2)
+#ifdef PLATFORM_ESP32
+// ESP32-S3 DWC2 OTG has only 4 non-control TX FIFOs, so we skip keyboard+mouse
+// to keep total IN endpoints <= 4 (gamepad + CDC notif + CDC data = 3)
+enum {
+#if CFG_TUD_CDC >= 1
+    ITF_NUM_CDC_0 = ITF_NUM_HID_GAMEPAD + 1,
+    ITF_NUM_CDC_0_DATA,
+#endif
+    ITF_NUM_TOTAL
+};
+#else
 enum {
 #if CFG_TUD_CDC >= 1
     ITF_NUM_CDC_0 = ITF_NUM_HID_MOUSE + 1,  // CDC 0 control interface (data port)
@@ -1420,24 +1440,35 @@ enum {
 #endif
     ITF_NUM_TOTAL
 };
+#endif
 
 // Backward compatibility alias for non-composite modes
 #define ITF_NUM_HID         ITF_NUM_HID_GAMEPAD
 
-// Endpoint numbers (shifted to accommodate 3 HID interfaces)
+// Endpoint numbers
 #define EPNUM_HID_GAMEPAD       0x81  // Gamepad IN
 #define EPNUM_HID_GAMEPAD_OUT   0x01  // Gamepad OUT (rumble/output reports)
+#ifndef PLATFORM_ESP32
+// Keyboard/mouse endpoints only on RP2040 (ESP32 skips these to save FIFOs)
 #define EPNUM_HID_KEYBOARD      0x82  // Keyboard IN
 #define EPNUM_HID_MOUSE         0x83  // Mouse IN
+#endif
 
 // Backward compatibility aliases
 #define EPNUM_HID           EPNUM_HID_GAMEPAD
 #define EPNUM_HID_OUT       EPNUM_HID_GAMEPAD_OUT
 
 #if CFG_TUD_CDC >= 1
+#ifdef PLATFORM_ESP32
+// CDC endpoints shifted down (no keyboard/mouse endpoints)
+#define EPNUM_CDC_0_NOTIF   0x82
+#define EPNUM_CDC_0_OUT     0x03
+#define EPNUM_CDC_0_IN      0x83
+#else
 #define EPNUM_CDC_0_NOTIF   0x84
 #define EPNUM_CDC_0_OUT     0x05
 #define EPNUM_CDC_0_IN      0x85
+#endif
 #endif
 
 
@@ -1519,12 +1550,14 @@ static const uint8_t desc_frag_hid_gamepad[] = {
 static const uint8_t desc_frag_sinput_gamepad[] = {
     TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID_GAMEPAD, 0, HID_ITF_PROTOCOL_NONE, sizeof(sinput_report_descriptor), EPNUM_HID_GAMEPAD_OUT, EPNUM_HID_GAMEPAD, CFG_TUD_HID_EP_BUFSIZE, 1),
 };
+#ifndef PLATFORM_ESP32
 static const uint8_t desc_frag_sinput_keyboard[] = {
     TUD_HID_DESCRIPTOR(ITF_NUM_HID_KEYBOARD, 0, HID_ITF_PROTOCOL_NONE, sizeof(sinput_keyboard_report_descriptor), EPNUM_HID_KEYBOARD, 16, 1),
 };
 static const uint8_t desc_frag_sinput_mouse[] = {
     TUD_HID_DESCRIPTOR(ITF_NUM_HID_MOUSE, 0, HID_ITF_PROTOCOL_NONE, sizeof(sinput_mouse_report_descriptor), EPNUM_HID_MOUSE, 8, 1),
 };
+#endif
 
 // CDC 0 fragment (data port - always present)
 static const uint8_t desc_frag_cdc0[] = {
@@ -1566,13 +1599,21 @@ static void build_config_descriptors(void)
     memcpy(runtime_desc_hid, hid_header, TUD_CONFIG_DESC_LEN);
 
     // --- SInput mode descriptor ---
-    // Interfaces: 3 HID + 2 CDC (data)
+#ifdef PLATFORM_ESP32
+    // ESP32: gamepad only (no keyboard/mouse) to stay within 4 FIFO limit
+    uint8_t sinput_itf_count = 1 + 2;  // 1 HID + CDC0 (2 interfaces)
+    off = TUD_CONFIG_DESC_LEN;
+    off = append_fragment(runtime_desc_sinput, off, desc_frag_sinput_gamepad, sizeof(desc_frag_sinput_gamepad));
+    off = append_fragment(runtime_desc_sinput, off, desc_frag_cdc0, sizeof(desc_frag_cdc0));
+#else
+    // RP2040: full composite (gamepad + keyboard + mouse + CDC)
     uint8_t sinput_itf_count = 3 + 2;  // 3 HID + CDC0 (2 interfaces)
     off = TUD_CONFIG_DESC_LEN;  // Skip header
     off = append_fragment(runtime_desc_sinput, off, desc_frag_sinput_gamepad, sizeof(desc_frag_sinput_gamepad));
     off = append_fragment(runtime_desc_sinput, off, desc_frag_sinput_keyboard, sizeof(desc_frag_sinput_keyboard));
     off = append_fragment(runtime_desc_sinput, off, desc_frag_sinput_mouse, sizeof(desc_frag_sinput_mouse));
     off = append_fragment(runtime_desc_sinput, off, desc_frag_cdc0, sizeof(desc_frag_cdc0));
+#endif
 
     // Write config header (9 bytes)
     uint8_t sinput_header[] = {

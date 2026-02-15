@@ -14,7 +14,7 @@
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -420,7 +420,7 @@ static void ds3_task(bthid_device_t* device)
     ds3_bt_data_t* ds3 = (ds3_bt_data_t*)device->driver_data;
     if (!ds3) return;
 
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
 
     // State machine for activation with delays
     switch (ds3->activation_state) {

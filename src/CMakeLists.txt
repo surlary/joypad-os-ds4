@@ -85,6 +85,7 @@ set(CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/core/services/players/feedback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/core/services/profiles/profile.c
     ${CMAKE_CURRENT_SOURCE_DIR}/core/services/profiles/profile_indicator.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/platform/rp2040/platform_rp2040.c
 )
 
 # USB Host sources (HID + X-input)
@@ -175,6 +176,7 @@ set(BTSTACK_SOURCES
     ${PICO_BTSTACK_PATH}/src/ble/le_device_db_tlv.c
     # BLE GATT services
     ${PICO_BTSTACK_PATH}/src/ble/gatt-service/hids_client.c
+    ${PICO_BTSTACK_PATH}/src/ble/gatt-service/device_information_service_client.c
     # Classic (for HID Host)
     ${PICO_BTSTACK_PATH}/src/classic/sdp_client.c
     ${PICO_BTSTACK_PATH}/src/classic/sdp_server.c

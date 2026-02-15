@@ -17,7 +17,7 @@
 #ifndef BT_MAX_CONNECTIONS
 #define BT_MAX_CONNECTIONS      6
 #endif
-#define BT_MAX_NAME_LEN         32
+#define BT_MAX_NAME_LEN         48
 
 // ============================================================================
 // CONNECTION INFO

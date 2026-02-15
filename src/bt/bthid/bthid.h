@@ -12,7 +12,7 @@
 // ============================================================================
 
 #define BTHID_MAX_DEVICES       4   // Max simultaneous BT HID devices
-#define BTHID_MAX_NAME_LEN      32  // Max device name length
+#define BTHID_MAX_NAME_LEN      48  // Max device name length
 
 // ============================================================================
 // HID REPORT TYPES (Bluetooth HID spec)

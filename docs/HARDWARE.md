@@ -227,6 +227,21 @@ Joypad Core can also output as a USB HID gamepad, allowing you to:
 - `snes2usb` - SNES controller → USB HID gamepad
 - `controller_*` - Custom GPIO controllers → USB HID gamepad
 
+## Supported ESP32-S3 Boards
+
+### Seeed XIAO ESP32-S3
+
+- **Features**: USB-C, BLE, WiFi, 11 GPIO pins, boot button, user LED
+- **Form Factor**: Ultra-compact (0.84" x 0.70")
+- **Products**: bt2usb (BLE to USB adapter)
+- **Purchase**: [Seeed Studio](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html)
+
+**Notes:**
+- User LED on GPIO 21 (active low)
+- BLE only (no Classic Bluetooth)
+- Requires ESP-IDF to build (not pico-sdk)
+- See [ESP32 docs](ESP32.md) for build setup
+
 ## Supported RP2040 Boards
 
 ### Adafruit KB2040 (Recommended)

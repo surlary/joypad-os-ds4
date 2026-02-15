@@ -33,7 +33,11 @@ static bool gamepad_match(const char* device_name, const uint8_t* class_of_devic
     (void)device_name;
     (void)vendor_id;   // Generic driver doesn't use VID/PID
     (void)product_id;
-    (void)is_ble;
+
+    // BLE devices don't have COD — match any BLE HID device as fallback
+    if (is_ble) {
+        return true;
+    }
 
     if (!class_of_device) {
         return false;

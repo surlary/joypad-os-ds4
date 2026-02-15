@@ -11,7 +11,7 @@
 #include "descriptors/sinput_descriptors.h"
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
-#include "pico/unique_id.h"
+#include "platform/platform.h"
 #include <string.h>
 
 #if (defined(CONFIG_USB_HOST) || defined(CONFIG_USB)) && !defined(DISABLE_USB_HOST)
@@ -282,7 +282,7 @@ static bool sinput_mode_send_report(uint8_t player_index,
     sinput_report.rt = convert_trigger_to_s16(profile_out->r2_analog);
 
     // IMU timestamp (microseconds since boot)
-    sinput_report.imu_timestamp = time_us_32();
+    sinput_report.imu_timestamp = platform_time_us();
 
     // IMU data - passthrough from input controller if available
     if (event->has_motion) {
@@ -507,14 +507,14 @@ static void sinput_mode_task(void)
     feature_response[17] = 0;  // touchpad finger count
 
     // Serial number from board unique ID (last 6 bytes of 8-byte ID)
-    pico_unique_board_id_t board_id;
-    pico_get_unique_board_id(&board_id);
-    feature_response[18] = board_id.id[2];
-    feature_response[19] = board_id.id[3];
-    feature_response[20] = board_id.id[4];
-    feature_response[21] = board_id.id[5];
-    feature_response[22] = board_id.id[6];
-    feature_response[23] = board_id.id[7];
+    uint8_t board_id[8];
+    platform_get_unique_id(board_id, sizeof(board_id));
+    feature_response[18] = board_id[2];
+    feature_response[19] = board_id[3];
+    feature_response[20] = board_id[4];
+    feature_response[21] = board_id[5];
+    feature_response[22] = board_id[6];
+    feature_response[23] = board_id[7];
 
     tud_hid_n_report(ITF_NUM_HID_GAMEPAD, SINPUT_REPORT_ID_FEATURES, feature_response, sizeof(feature_response));
 }
