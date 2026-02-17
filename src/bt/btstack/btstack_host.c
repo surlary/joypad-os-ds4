@@ -35,6 +35,7 @@ extern void btstack_memory_init(void);
 #include "ble/le_device_db.h"
 #include "ble/gatt-service/hids_client.h"
 #include "ble/gatt-service/device_information_service_client.h"
+#include "ble/gatt-service/battery_service_client.h"
 #include "classic/hid_host.h"
 #include "classic/sdp_client.h"
 #include "classic/sdp_server.h"
@@ -61,6 +62,7 @@ extern void bt_on_disconnect(uint8_t conn_index);
 extern void bt_on_hid_report(uint8_t conn_index, const uint8_t* data, uint16_t len);
 extern void bthid_update_device_info(uint8_t conn_index, const char* name,
                                       uint16_t vendor_id, uint16_t product_id);
+extern void bthid_set_battery_level(uint8_t conn_index, uint8_t level);
 
 #include <stdio.h>
 #include <string.h>
@@ -211,6 +213,9 @@ static struct {
 
     // HIDS Client
     uint16_t hids_cid;
+
+    // Battery Service Client
+    uint16_t bas_cid;
 
 } hid_state;
 
@@ -431,6 +436,9 @@ static void setup_hid_handlers(void)
 
     printf("[BTSTACK_HOST] Init DIS client...\n");
     device_information_service_client_init();
+
+    printf("[BTSTACK_HOST] Init Battery Service client...\n");
+    battery_service_client_init();
 
     printf("[BTSTACK_HOST] Init LE Device DB...\n");
     le_device_db_init();
@@ -1842,6 +1850,10 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                     hids_client_disconnect(hid_state.hids_cid);
                     hid_state.hids_cid = 0;
                 }
+                if (hid_state.bas_cid != 0) {
+                    battery_service_client_disconnect(hid_state.bas_cid);
+                    hid_state.bas_cid = 0;
+                }
                 hid_state.gatt_state = GATT_IDLE;
                 hid_state.gatt_handle = 0;
 
@@ -3010,6 +3022,55 @@ static void start_hids_client(ble_connection_t *conn)
 }
 
 // ============================================================================
+// BAS (BATTERY SERVICE) CLIENT HANDLER
+// ============================================================================
+
+static void bas_client_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size)
+{
+    UNUSED(packet_type);
+    UNUSED(channel);
+    UNUSED(size);
+
+    if (hci_event_packet_get_type(packet) != HCI_EVENT_GATTSERVICE_META) return;
+
+    switch (hci_event_gattservice_meta_get_subevent_code(packet)) {
+        case GATTSERVICE_SUBEVENT_BATTERY_SERVICE_CONNECTED: {
+            uint8_t status = gattservice_subevent_battery_service_connected_get_status(packet);
+            uint8_t num_instances = gattservice_subevent_battery_service_connected_get_num_instances(packet);
+            printf("[BTSTACK_HOST] BAS connected: status=%d instances=%d\n", status, num_instances);
+            break;
+        }
+
+        case GATTSERVICE_SUBEVENT_BATTERY_SERVICE_LEVEL: {
+            uint8_t att_status = gattservice_subevent_battery_service_level_get_att_status(packet);
+            uint8_t level = gattservice_subevent_battery_service_level_get_level(packet);
+
+            if (att_status != ATT_ERROR_SUCCESS) break;
+
+            // Find conn_index for the current BLE connection
+            int conn_index = get_ble_conn_index_by_handle(hid_state.gatt_handle);
+            if (conn_index >= 0) {
+                bthid_set_battery_level((uint8_t)conn_index, level);
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+static void start_battery_service_client(hci_con_handle_t handle)
+{
+    uint8_t status = battery_service_client_connect(handle, bas_client_handler, 60000, &hid_state.bas_cid);
+    if (status != ERROR_CODE_SUCCESS) {
+        printf("[BTSTACK_HOST] BAS connect failed: status=%d\n", status);
+    } else {
+        printf("[BTSTACK_HOST] BAS connect started: cid=0x%04X\n", hid_state.bas_cid);
+    }
+}
+
+// ============================================================================
 // DIS (DEVICE INFORMATION SERVICE) CLIENT HANDLER
 // ============================================================================
 
@@ -3045,6 +3106,8 @@ static void dis_client_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
             hci_con_handle_t handle = gattservice_subevent_device_information_done_get_con_handle(packet);
             uint8_t att_status = gattservice_subevent_device_information_done_get_att_status(packet);
             printf("[BTSTACK_HOST] DIS query done: handle=0x%04X status=0x%02X\n", handle, att_status);
+            // Start Battery Service client after DIS completes (avoids GATT procedure contention)
+            start_battery_service_client(handle);
             break;
         }
 
@@ -3094,6 +3157,8 @@ static void hids_client_handler(uint8_t packet_type, uint16_t channel, uint8_t *
                     uint8_t dis_status = device_information_service_client_query(conn->handle, dis_client_handler);
                     if (dis_status != ERROR_CODE_SUCCESS) {
                         printf("[BTSTACK_HOST] DIS query failed to start: status=%d (singleton busy)\n", dis_status);
+                        // DIS unavailable — start BAS directly as fallback
+                        start_battery_service_client(conn->handle);
                     }
                 }
 

@@ -115,6 +115,7 @@ set(SRCS
     "${BTSTACK_PATH}/src/ble/le_device_db_tlv.c"
     "${BTSTACK_PATH}/src/ble/gatt-service/hids_client.c"
     "${BTSTACK_PATH}/src/ble/gatt-service/device_information_service_client.c"
+    "${BTSTACK_PATH}/src/ble/gatt-service/battery_service_client.c"
 
     # --- BTstack Classic (compiles but dead code on ESP32-S3 BLE-only) ---
     "${BTSTACK_PATH}/src/classic/sdp_client.c"

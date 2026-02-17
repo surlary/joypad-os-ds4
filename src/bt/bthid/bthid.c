@@ -2,6 +2,7 @@
 // Handles Bluetooth HID devices and routes reports to device-specific drivers
 
 #include "bthid.h"
+#include "core/input_event.h"
 #include "bt/transport/bt_transport.h"
 #include "devices/generic/bthid_gamepad.h"
 #include "devices/vendors/sony/ds3_bt.h"
@@ -457,6 +458,27 @@ void bt_on_hid_report(uint8_t conn_index, const uint8_t* data, uint16_t len)
         default:
             printf("[BTHID] Unhandled transaction: 0x%02X\n", trans_type);
             break;
+    }
+}
+
+// ============================================================================
+// BATTERY
+// ============================================================================
+
+void bthid_set_battery_level(uint8_t conn_index, uint8_t level)
+{
+    bthid_device_t* device = bthid_get_device(conn_index);
+    if (!device || !device->driver_data) {
+        return;
+    }
+
+    // All driver data structs have input_event_t as their first field
+    input_event_t* event = (input_event_t*)device->driver_data;
+
+    // Only set if driver hasn't already provided battery from HID reports
+    if (event->battery_level == 0 && level > 0) {
+        event->battery_level = level;
+        printf("[BTHID] BAS battery: %d%% (conn %d)\n", level, conn_index);
     }
 }
 

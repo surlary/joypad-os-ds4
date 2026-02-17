@@ -177,6 +177,7 @@ set(BTSTACK_SOURCES
     # BLE GATT services
     ${PICO_BTSTACK_PATH}/src/ble/gatt-service/hids_client.c
     ${PICO_BTSTACK_PATH}/src/ble/gatt-service/device_information_service_client.c
+    ${PICO_BTSTACK_PATH}/src/ble/gatt-service/battery_service_client.c
     # Classic (for HID Host)
     ${PICO_BTSTACK_PATH}/src/classic/sdp_client.c
     ${PICO_BTSTACK_PATH}/src/classic/sdp_server.c

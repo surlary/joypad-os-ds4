@@ -142,4 +142,11 @@ bool bthid_send_output_report(uint8_t conn_index, uint8_t report_id,
 bool bthid_send_feature_report(uint8_t conn_index, uint8_t report_id,
                                 const uint8_t* data, uint16_t len);
 
+// ============================================================================
+// BATTERY
+// ============================================================================
+
+// Set battery level from BLE Battery Service (only if driver hasn't set it)
+void bthid_set_battery_level(uint8_t conn_index, uint8_t level);
+
 #endif // BTHID_H
