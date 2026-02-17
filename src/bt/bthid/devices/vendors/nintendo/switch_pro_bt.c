@@ -352,6 +352,11 @@ static void switch_process_report(bthid_device_t* device, const uint8_t* data, u
         sw->event.analog[ANALOG_RX] = scale_12bit_to_8bit(rx);
         sw->event.analog[ANALOG_RY] = 255 - scale_12bit_to_8bit(ry);
 
+        // Battery: bits 7-4 = level (0/2/4/6/8), bit 3 = charging
+        uint8_t bat_raw = rpt->battery_conn >> 4;
+        sw->event.battery_level = (bat_raw > 8) ? 100 : bat_raw * 12 + 5;
+        sw->event.battery_charging = (rpt->battery_conn & 0x08) != 0;
+
         router_submit_input(&sw->event);
 
     } else if (report_id == SWITCH_REPORT_INPUT_SIMPLE && len >= 12) {
