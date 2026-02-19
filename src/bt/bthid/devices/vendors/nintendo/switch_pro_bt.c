@@ -116,8 +116,8 @@ typedef struct __attribute__((packed)) {
     };
 
     uint8_t hat;            // D-pad as hat (0-7, 8=center)
-    uint8_t lx, ly;         // Left stick (0-255)
-    uint8_t rx, ry;         // Right stick (0-255)
+    uint16_t lx, ly;        // Left stick (0-65535, center ~32768)
+    uint16_t rx, ry;        // Right stick (0-65535, center ~32768)
 } switch_simple_report_t;
 
 // ============================================================================
@@ -331,6 +331,7 @@ static void switch_process_report(bthid_device_t* device, const uint8_t* data, u
         if (rpt->lstick) buttons |= JP_BUTTON_L3;
         if (rpt->rstick) buttons |= JP_BUTTON_R3;
         if (rpt->home)   buttons |= JP_BUTTON_A1;
+        if (rpt->capture) buttons |= JP_BUTTON_A2;
 
         // D-pad
         if (rpt->up)     buttons |= JP_BUTTON_DU;
@@ -378,6 +379,7 @@ static void switch_process_report(bthid_device_t* device, const uint8_t* data, u
         if (rpt->lstick) buttons |= JP_BUTTON_L3;
         if (rpt->rstick) buttons |= JP_BUTTON_R3;
         if (rpt->home)   buttons |= JP_BUTTON_A1;
+        if (rpt->capture) buttons |= JP_BUTTON_A2;
 
         // Hat to D-pad
         if (rpt->hat == 0 || rpt->hat == 1 || rpt->hat == 7) buttons |= JP_BUTTON_DU;
@@ -386,10 +388,11 @@ static void switch_process_report(bthid_device_t* device, const uint8_t* data, u
         if (rpt->hat >= 5 && rpt->hat <= 7) buttons |= JP_BUTTON_DL;
 
         sw->event.buttons = buttons;
-        sw->event.analog[ANALOG_LX] = rpt->lx;
-        sw->event.analog[ANALOG_LY] = 255 - rpt->ly;  // Invert Y (Nintendo: up=high, HID: up=low)
-        sw->event.analog[ANALOG_RX] = rpt->rx;
-        sw->event.analog[ANALOG_RY] = 255 - rpt->ry;  // Invert Y (Nintendo: up=high, HID: up=low)
+        // 16-bit sticks scaled to 8-bit (0-65535 → 0-255)
+        sw->event.analog[ANALOG_LX] = rpt->lx >> 8;
+        sw->event.analog[ANALOG_LY] = 255 - (rpt->ly >> 8);  // Invert Y (Nintendo: up=high, HID: up=low)
+        sw->event.analog[ANALOG_RX] = rpt->rx >> 8;
+        sw->event.analog[ANALOG_RY] = 255 - (rpt->ry >> 8);  // Invert Y (Nintendo: up=high, HID: up=low)
 
         router_submit_input(&sw->event);
     }

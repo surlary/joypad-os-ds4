@@ -69,10 +69,11 @@ const bt_device_profile_t BT_PROFILE_SONY = {
 
 const bt_device_profile_t BT_PROFILE_SWITCH = {
     .name = "Switch",
-    .classic = BT_CLASSIC_HID_HOST,
+    .classic = BT_CLASSIC_DIRECT_L2CAP,
     .ble = BT_BLE_GATT_HIDS,
     .hid_mode = BT_HID_MODE_REPORT,
     .pin_type = BT_PIN_NONE,
+    .default_vid = 0x057E,
 };
 
 const bt_device_profile_t BT_PROFILE_SWITCH2 = {
@@ -146,5 +147,7 @@ uint16_t bt_device_wiimote_pid_from_name(const char* name) {
     if (!name || !name[0]) return 0;
     if (strstr(name, "-UC") != NULL) return 0x0330;           // Wii U Pro
     if (strstr(name, "RVL-CNT-01") != NULL) return 0x0306;    // Wiimote
+    if (strstr(name, "Pro Controller") != NULL) return 0x2009; // Switch Pro
+    if (strstr(name, "Joy-Con") != NULL) return 0x2006;        // Joy-Con (L default)
     return 0;
 }
