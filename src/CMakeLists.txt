@@ -914,6 +914,42 @@ target_link_libraries(joypad_gc2usb PRIVATE pico_stdlib pico_multicore hardware_
 joypad_target_common(joypad_gc2usb)
 pico_generate_pio_header(joypad_gc2usb ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
 
+# --- NEGEO2USB (NEOGEO -> USB HID) ---
+add_executable(joypad_neogeo2usb)
+target_compile_definitions(joypad_neogeo2usb PRIVATE CONFIG_NEOGEO2USB=1 CONFIG_USB=1 DISABLE_USB_HOST=1 BUTTON_USER_GPIO=${BOARD_BUTTON_GPIO})
+target_sources(joypad_neogeo2usb PUBLIC ${CORE_SOURCES} ${USB_DEVICE_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/arcade/arcade_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/neogeo2usb/app.c
+)
+target_include_directories(joypad_neogeo2usb PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/neogeo2usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/arcade
+)
+target_link_libraries(joypad_neogeo2usb PRIVATE pico_stdlib pico_multicore hardware_pio pico_rand tinyusb_device tinyusb_board)
+joypad_target_common(joypad_neogeo2usb)
+
+# NEGEO2USB — RP2040-Zero (WS2812 on GP16, auto from board def)
+add_executable(joypad_neogeo2usb_rp2040zero)
+target_compile_definitions(joypad_neogeo2usb_rp2040zero PRIVATE
+    CONFIG_NEOGEO2USB=1
+    CONFIG_USB=1
+    DISABLE_USB_HOST=1
+    USE_BOOTSEL_BUTTON=1
+    PICO_RP2040_ZERO_BUILD=1
+)
+target_sources(joypad_neogeo2usb_rp2040zero PUBLIC ${CORE_SOURCES} ${USB_DEVICE_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/arcade/arcade_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/neogeo2usb/app.c
+)
+target_include_directories(joypad_neogeo2usb_rp2040zero PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/neogeo2usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/arcade
+)
+target_link_libraries(joypad_neogeo2usb_rp2040zero PRIVATE pico_stdlib pico_multicore hardware_pio pico_rand tinyusb_device tinyusb_board)
+joypad_target_common(joypad_neogeo2usb_rp2040zero)
+
 # ============================================================================
 # CONTROLLER APPS (GPIO/pad input -> USB output)
 # ============================================================================
