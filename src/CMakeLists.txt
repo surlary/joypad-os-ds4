@@ -580,6 +580,27 @@ joypad_target_common(joypad_n642dc)
 pico_generate_pio_header(joypad_n642dc ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
 pico_generate_pio_header(joypad_n642dc ${CMAKE_CURRENT_LIST_DIR}/native/device/dreamcast/maple.pio)
 
+# --- N64 to Nuon ---
+add_executable(joypad_n642nuon)
+target_compile_definitions(joypad_n642nuon PRIVATE CONFIG_N642NUON=1 CONFIG_NUON=1 CONFIG_NO_NEOPIXEL=1 N64_PIN_DATA=29)
+target_sources(joypad_n642nuon PUBLIC ${COMMON_SOURCES}
+    ${N64_HOST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/nuon/nuon_device.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642nuon/app.c
+)
+target_include_directories(joypad_n642nuon PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642nuon
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/n64
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/nuon
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/include
+)
+target_link_libraries(joypad_n642nuon PRIVATE ${COMMON_LIBRARIES} pico_bit_ops)
+joypad_target_common(joypad_n642nuon)
+# No BTstack - native N64 input only
+pico_generate_pio_header(joypad_n642nuon ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
+pico_generate_pio_header(joypad_n642nuon ${CMAKE_CURRENT_LIST_DIR}/native/device/nuon/polyface_read.pio)
+pico_generate_pio_header(joypad_n642nuon ${CMAKE_CURRENT_LIST_DIR}/native/device/nuon/polyface_send.pio)
+
 # --- 3DO ---
 add_executable(joypad_3do)
 target_compile_definitions(joypad_3do PRIVATE CONFIG_3DO=1)
@@ -814,6 +835,56 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
     joypad_target_common(joypad_bt2usb)
     pico_enable_stdio_usb(joypad_bt2usb 0)
     pico_enable_stdio_uart(joypad_bt2usb 1)
+
+    # --- BT to Nuon (Pico W / Pico 2 W built-in Bluetooth -> Nuon) ---
+    add_executable(joypad_bt2nuon)
+    target_compile_definitions(joypad_bt2nuon PRIVATE
+        CONFIG_BT2NUON=1
+        DISABLE_USB_HOST=1
+        USE_BOOTSEL_BUTTON=1
+        CYW43_LWIP=0
+        BTSTACK_USE_CYW43=1
+        ENABLE_BTSTACK=1
+    )
+    target_sources(joypad_bt2nuon PUBLIC
+        ${CORE_SOURCES}
+        ${USB_DEVICE_SOURCES}
+        ${BTHID_DEVICE_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbh/hid/devices/generic/hid_parser.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack/btstack_host.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack/bt_device_db.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/transport/bt_transport.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/transport/bt_transport_cyw43.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/native/device/nuon/nuon_device.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/bt2nuon/app.c
+    )
+    target_include_directories(joypad_bt2nuon PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/bt2nuon
+        ${CMAKE_CURRENT_SOURCE_DIR}/native/device/nuon
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/bthid
+        ${BTSTACK_INCLUDES}
+    )
+    target_link_libraries(joypad_bt2nuon PRIVATE
+        pico_stdlib
+        pico_multicore
+        pico_rand
+        pico_bit_ops
+        hardware_pio
+        pico_cyw43_arch_poll
+        pico_btstack_ble
+        pico_btstack_classic
+        pico_btstack_cyw43
+        tinyusb_device
+        tinyusb_board
+    )
+    joypad_target_common(joypad_bt2nuon)
+    pico_enable_stdio_usb(joypad_bt2nuon 0)
+    pico_enable_stdio_uart(joypad_bt2nuon 1)
+    pico_generate_pio_header(joypad_bt2nuon ${CMAKE_CURRENT_LIST_DIR}/native/device/nuon/polyface_read.pio)
+    pico_generate_pio_header(joypad_bt2nuon ${CMAKE_CURRENT_LIST_DIR}/native/device/nuon/polyface_send.pio)
 
     # --- WiFi to USB (Pico W / Pico 2 W WiFi AP mode) ---
     add_executable(joypad_wifi2usb)
