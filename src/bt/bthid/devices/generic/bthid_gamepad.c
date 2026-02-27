@@ -185,15 +185,37 @@ void bthid_gamepad_set_descriptor(bthid_device_t* device, const uint8_t* desc, u
     uint8_t btns_count = 0;
     uint8_t idOffset = 0;
 
-    HID_ReportItem_t* item = info->FirstReportItem;
-
-    // Check if report uses report IDs
-    if (item && item->ReportID) {
-        idOffset = 8;  // Report ID takes first byte (8 bits)
-        gp->map.report_id = item->ReportID;
+    // Pass 1: Find the gamepad report ID (the one containing Generic Desktop X axis)
+    // This reliably identifies the gamepad report in multi-report-ID descriptors
+    // that may also contain Consumer Control, Keyboard, or other collections.
+    uint8_t gamepad_report_id = 0;
+    HID_ReportItem_t* scan = info->FirstReportItem;
+    while (scan) {
+        if (scan->Attributes.Usage.Page == 0x01 && scan->Attributes.Usage.Usage == 0x30) {
+            gamepad_report_id = scan->ReportID;
+            break;
+        }
+        scan = scan->Next;
     }
 
+    // Set up report ID offset
+    if (gamepad_report_id) {
+        idOffset = 8;  // Report ID takes first byte (8 bits)
+        gp->map.report_id = gamepad_report_id;
+    } else if (info->UsingReportIDs && info->FirstReportItem) {
+        // Fallback: use first item's report ID
+        idOffset = 8;
+        gp->map.report_id = info->FirstReportItem->ReportID;
+    }
+
+    // Pass 2: Only process items from the gamepad report
+    HID_ReportItem_t* item = info->FirstReportItem;
     while (item) {
+        // Skip items from other report IDs
+        if (item->ReportID != gamepad_report_id) {
+            item = item->Next;
+            continue;
+        }
         uint8_t bitSize = item->Attributes.BitSize;
         uint8_t bitOffset = item->BitOffset + idOffset;
         uint16_t bitMask = ((0xFFFF >> (16 - bitSize)) << (bitOffset % 8));
@@ -351,7 +373,7 @@ static void process_report_dynamic(bthid_gamepad_data_t* gp, const uint8_t* data
     // Generic Desktop triggers (Rx/Ry) = sequential button layout
     const uint32_t* btn_map;
     uint8_t btn_map_size;
-    if (map->has_sim_triggers) {
+    if (map->is_xbox && map->has_sim_triggers) {
         // Xbox BLE: gap-pattern buttons with Simulation Controls triggers
         btn_map = XBOX_BUTTON_MAP;
         btn_map_size = sizeof(XBOX_BUTTON_MAP) / sizeof(XBOX_BUTTON_MAP[0]);

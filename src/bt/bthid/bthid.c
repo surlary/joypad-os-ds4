@@ -82,6 +82,7 @@ void bthid_register_driver(const bthid_driver_t* driver)
 // ============================================================================
 
 static bool bthid_task_debug_done = false;
+static bool bt_on_hid_report_debug_done = false;
 
 void bthid_task(void)
 {
@@ -428,11 +429,13 @@ void bt_on_disconnect(uint8_t conn_index)
     }
     remove_device(conn_index);
 
+    // Reset one-shot debug flags so reconnections produce debug output
+    bt_on_hid_report_debug_done = false;
+    bthid_task_debug_done = false;
+
     // Check if we have pending flash writes now that BT may be idle
     flash_on_bt_disconnect();
 }
-
-static bool bt_on_hid_report_debug_done = false;
 
 void bt_on_hid_report(uint8_t conn_index, const uint8_t* data, uint16_t len)
 {
@@ -450,7 +453,7 @@ void bt_on_hid_report(uint8_t conn_index, const uint8_t* data, uint16_t len)
         return;
     }
 
-    // Debug first report
+    // Debug first report after (re)connection
     if (!bt_on_hid_report_debug_done) {
         printf("[BTHID] First report: conn=%d, len=%d, data[0]=0x%02X\n",
                conn_index, len, data[0]);

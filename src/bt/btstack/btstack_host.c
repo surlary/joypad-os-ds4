@@ -3457,6 +3457,8 @@ bool btstack_host_is_scanning(void)
 // CLASSIC BT HID HOST PACKET HANDLER
 // ============================================================================
 
+static bool btstack_report_debug_done = false;
+
 static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size)
 {
     UNUSED(channel);
@@ -3757,7 +3759,6 @@ static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8
             uint16_t report_len = hid_subevent_report_get_report_len(packet);
 
             // Debug: show raw BTstack report
-            static bool btstack_report_debug_done = false;
             if (!btstack_report_debug_done && report_len >= 4) {
                 printf("[BTSTACK_HOST] Raw report len=%d: %02X %02X %02X %02X\n",
                        report_len, report[0], report[1], report[2], report[3]);
@@ -3776,6 +3777,9 @@ static void hid_host_packet_handler(uint8_t packet_type, uint16_t channel, uint8
         case HID_SUBEVENT_CONNECTION_CLOSED: {
             uint16_t hid_cid = hid_subevent_connection_closed_get_hid_cid(packet);
             printf("[BTSTACK_HOST] HID connection closed, cid=0x%04X\n", hid_cid);
+
+            // Reset debug flag so reconnections produce debug output
+            btstack_report_debug_done = false;
 
             // Notify bthid layer
             int conn_index = get_classic_conn_index(hid_cid);
