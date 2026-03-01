@@ -3,41 +3,39 @@
 // Copyright 2024 Robert Dale Smith
 
 #include "display.h"
-#include "hardware/spi.h"
-#include "hardware/gpio.h"
+#include "display_transport.h"
 #include "pico/stdlib.h"
 #include <string.h>
 #include <stdio.h>
 
 // ============================================================================
-// SH1106 COMMANDS
+// SH1106/SH1107 COMMANDS (shared command set)
 // ============================================================================
 
-#define SH1106_SET_CONTRAST         0x81
-#define SH1106_DISPLAY_ALL_ON_RESUME 0xA4
-#define SH1106_DISPLAY_ALL_ON       0xA5
-#define SH1106_NORMAL_DISPLAY       0xA6
-#define SH1106_INVERT_DISPLAY       0xA7
-#define SH1106_DISPLAY_OFF          0xAE
-#define SH1106_DISPLAY_ON           0xAF
-#define SH1106_SET_DISPLAY_OFFSET   0xD3
-#define SH1106_SET_COM_PINS         0xDA
-#define SH1106_SET_VCOM_DETECT      0xDB
-#define SH1106_SET_DISPLAY_CLOCK    0xD5
-#define SH1106_SET_PRECHARGE        0xD9
-#define SH1106_SET_MULTIPLEX        0xA8
-#define SH1106_SET_LOW_COLUMN       0x00
-#define SH1106_SET_HIGH_COLUMN      0x10
-#define SH1106_SET_START_LINE       0x40
-#define SH1106_MEMORY_MODE          0x20
-#define SH1106_SET_PAGE_ADDR        0xB0
-#define SH1106_COM_SCAN_INC         0xC0
-#define SH1106_COM_SCAN_DEC         0xC8
-#define SH1106_SEG_REMAP            0xA0
-#define SH1106_CHARGE_PUMP          0x8D
-
-// SH1106 has 132 columns, but only 128 are visible (offset by 2)
-#define SH1106_COL_OFFSET           2
+#define SH110X_SET_CONTRAST         0x81
+#define SH110X_DISPLAY_ALL_ON_RESUME 0xA4
+#define SH110X_DISPLAY_ALL_ON       0xA5
+#define SH110X_NORMAL_DISPLAY       0xA6
+#define SH110X_INVERT_DISPLAY       0xA7
+#define SH110X_DISPLAY_OFF          0xAE
+#define SH110X_DISPLAY_ON           0xAF
+#define SH110X_SET_DISPLAY_OFFSET   0xD3
+#define SH110X_SET_COM_PINS         0xDA
+#define SH110X_SET_VCOM_DETECT      0xDB
+#define SH110X_SET_DISPLAY_CLOCK    0xD5
+#define SH110X_SET_PRECHARGE        0xD9
+#define SH110X_SET_MULTIPLEX        0xA8
+#define SH110X_SET_LOW_COLUMN       0x00
+#define SH110X_SET_HIGH_COLUMN      0x10
+#define SH110X_SET_START_LINE       0x40
+#define SH110X_MEMORY_MODE          0x20
+#define SH110X_SET_PAGE_ADDR        0xB0
+#define SH110X_COM_SCAN_INC         0xC0
+#define SH110X_COM_SCAN_DEC         0xC8
+#define SH110X_SEG_REMAP            0xA0
+#define SH110X_CHARGE_PUMP          0x8D
+#define SH110X_DCDC                 0xAD  // SH1107 DC-DC converter control
+#define SH110X_SET_START_LINE_DC    0xDC  // SH1107 display start line (2-byte cmd)
 
 // ============================================================================
 // 6x8 FONT
@@ -45,10 +43,10 @@
 
 // Arrow glyphs (chars 1-4: up, down, left, right)
 static const uint8_t font_arrows[][6] = {
-    {0x04,0x02,0x7F,0x02,0x04,0x00}, // char 1: ↑ up
-    {0x10,0x20,0x7F,0x20,0x10,0x00}, // char 2: ↓ down
-    {0x08,0x1C,0x2A,0x08,0x08,0x00}, // char 3: ← left
-    {0x08,0x08,0x2A,0x1C,0x08,0x00}, // char 4: → right
+    {0x04,0x02,0x7F,0x02,0x04,0x00}, // char 1: up
+    {0x10,0x20,0x7F,0x20,0x10,0x00}, // char 2: down
+    {0x08,0x1C,0x2A,0x08,0x08,0x00}, // char 3: left
+    {0x08,0x08,0x2A,0x1C,0x08,0x00}, // char 4: right
 };
 
 static const uint8_t font_6x8[] = {
@@ -154,106 +152,123 @@ static const uint8_t font_6x8[] = {
 // ============================================================================
 
 static bool initialized = false;
-static spi_inst_t* spi = NULL;
-static uint8_t pin_cs = 0;
-static uint8_t pin_dc = 0;
-static uint8_t pin_rst = 0;
+static uint8_t col_offset = 2;  // SH1106 default
+static bool rotated_panel = false;  // SH1107: 64x128 native panel rotated 90° to 128x64
+
+// Transport function pointers (set by display_spi_init or display_i2c_init)
+static void (*transport_write_cmd)(uint8_t) = NULL;
+static void (*transport_write_data)(const uint8_t*, size_t) = NULL;
 
 // Framebuffer (128x64 = 1024 bytes, organized as 8 pages of 128 bytes)
 static uint8_t framebuffer[DISPLAY_HEIGHT / 8][DISPLAY_WIDTH];
 
 // ============================================================================
-// LOW-LEVEL SPI FUNCTIONS
+// TRANSPORT
 // ============================================================================
 
-static inline void cs_select(void) {
-    gpio_put(pin_cs, 0);
+void display_set_transport(void (*write_cmd)(uint8_t),
+                           void (*write_data)(const uint8_t*, size_t)) {
+    transport_write_cmd = write_cmd;
+    transport_write_data = write_data;
 }
 
-static inline void cs_deselect(void) {
-    gpio_put(pin_cs, 1);
+void display_set_col_offset(uint8_t offset) {
+    col_offset = offset;
 }
 
-static void write_cmd(uint8_t cmd) {
-    gpio_put(pin_dc, 0);  // Command mode
-    cs_select();
-    spi_write_blocking(spi, &cmd, 1);
-    cs_deselect();
+static inline void write_cmd(uint8_t cmd) {
+    if (transport_write_cmd) transport_write_cmd(cmd);
 }
 
-static void write_data(const uint8_t* data, size_t len) {
-    gpio_put(pin_dc, 1);  // Data mode
-    cs_select();
-    spi_write_blocking(spi, data, len);
-    cs_deselect();
+static inline void write_data(const uint8_t* data, size_t len) {
+    if (transport_write_data) transport_write_data(data, len);
 }
+
+// ============================================================================
+// FORWARD DECLARATIONS (transport init in separate files)
+// ============================================================================
+
+extern void display_spi_init(const display_config_t* config);
+extern void display_i2c_init(const display_i2c_config_t* config);
 
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
 
 void display_init(const display_config_t* config) {
-    // Select SPI instance
-    spi = (config->spi_inst == 0) ? spi0 : spi1;
-    pin_cs = config->pin_cs;
-    pin_dc = config->pin_dc;
-    pin_rst = config->pin_rst;
+    // SPI transport init (sets function pointers + col_offset)
+    display_spi_init(config);
 
-    // Initialize SPI at 10MHz
-    spi_init(spi, 10 * 1000 * 1000);
-    gpio_set_function(config->pin_sck, GPIO_FUNC_SPI);
-    gpio_set_function(config->pin_mosi, GPIO_FUNC_SPI);
-
-    // Initialize control pins
-    gpio_init(pin_cs);
-    gpio_set_dir(pin_cs, GPIO_OUT);
-    gpio_put(pin_cs, 1);
-
-    gpio_init(pin_dc);
-    gpio_set_dir(pin_dc, GPIO_OUT);
-
-    gpio_init(pin_rst);
-    gpio_set_dir(pin_rst, GPIO_OUT);
-
-    // Reset display
-    gpio_put(pin_rst, 1);
-    sleep_ms(10);
-    gpio_put(pin_rst, 0);
-    sleep_ms(10);
-    gpio_put(pin_rst, 1);
-    sleep_ms(10);
-
-    // Initialize SH1106
-    write_cmd(SH1106_DISPLAY_OFF);
-    write_cmd(SH1106_SET_DISPLAY_CLOCK);
+    // SH1106 init sequence
+    write_cmd(SH110X_DISPLAY_OFF);
+    write_cmd(SH110X_SET_DISPLAY_CLOCK);
     write_cmd(0x80);  // Default clock
-    write_cmd(SH1106_SET_MULTIPLEX);
+    write_cmd(SH110X_SET_MULTIPLEX);
     write_cmd(0x3F);  // 64 lines
-    write_cmd(SH1106_SET_DISPLAY_OFFSET);
+    write_cmd(SH110X_SET_DISPLAY_OFFSET);
     write_cmd(0x00);
-    write_cmd(SH1106_SET_START_LINE | 0x00);
-    write_cmd(SH1106_CHARGE_PUMP);
+    write_cmd(SH110X_SET_START_LINE | 0x00);
+    write_cmd(SH110X_CHARGE_PUMP);
     write_cmd(0x14);  // Enable charge pump
-    write_cmd(SH1106_SEG_REMAP | 0x01);  // Flip horizontally
-    write_cmd(SH1106_COM_SCAN_DEC);      // Flip vertically
-    write_cmd(SH1106_SET_COM_PINS);
+    write_cmd(SH110X_SEG_REMAP | 0x01);  // Flip horizontally
+    write_cmd(SH110X_COM_SCAN_DEC);      // Flip vertically
+    write_cmd(SH110X_SET_COM_PINS);
     write_cmd(0x12);
-    write_cmd(SH1106_SET_CONTRAST);
+    write_cmd(SH110X_SET_CONTRAST);
     write_cmd(0xCF);
-    write_cmd(SH1106_SET_PRECHARGE);
+    write_cmd(SH110X_SET_PRECHARGE);
     write_cmd(0xF1);
-    write_cmd(SH1106_SET_VCOM_DETECT);
+    write_cmd(SH110X_SET_VCOM_DETECT);
     write_cmd(0x40);
-    write_cmd(SH1106_DISPLAY_ALL_ON_RESUME);
-    write_cmd(SH1106_NORMAL_DISPLAY);
-    write_cmd(SH1106_DISPLAY_ON);
+    write_cmd(SH110X_DISPLAY_ALL_ON_RESUME);
+    write_cmd(SH110X_NORMAL_DISPLAY);
+    write_cmd(SH110X_DISPLAY_ON);
 
     // Clear framebuffer and display
     display_clear();
     display_update();
 
     initialized = true;
-    printf("[display] Initialized SH1106 128x64 OLED\n");
+    printf("[display] Initialized SH1106 128x64 OLED (SPI)\n");
+}
+
+void display_init_i2c(const display_i2c_config_t* config) {
+    // I2C transport init (sets function pointers + col_offset)
+    display_i2c_init(config);
+    rotated_panel = true;  // SH1107 is 64x128 native, rotated 90° to 128x64
+
+    // SH1107 128x64 init sequence (from Adafruit SH110X library)
+    write_cmd(SH110X_DISPLAY_OFF);
+    write_cmd(SH110X_SET_DISPLAY_CLOCK);
+    write_cmd(0x51);
+    write_cmd(SH110X_MEMORY_MODE);       // Page addressing mode (single-byte on SH1107)
+    write_cmd(SH110X_SET_CONTRAST);
+    write_cmd(0x4F);
+    write_cmd(SH110X_DCDC);              // DC-DC converter (required for display power)
+    write_cmd(0x8A);
+    write_cmd(SH110X_SEG_REMAP);         // No segment remap for FeatherWing orientation
+    write_cmd(SH110X_COM_SCAN_INC);      // COM scan increment
+    write_cmd(SH110X_SET_START_LINE_DC);  // SH1107 start line (2-byte command)
+    write_cmd(0x00);
+    write_cmd(SH110X_SET_DISPLAY_OFFSET);
+    write_cmd(0x60);                     // 128x64: offset 0x60
+    write_cmd(SH110X_SET_PRECHARGE);
+    write_cmd(0x22);
+    write_cmd(SH110X_SET_VCOM_DETECT);
+    write_cmd(0x35);
+    write_cmd(SH110X_SET_MULTIPLEX);
+    write_cmd(0x3F);                     // 64 lines
+    write_cmd(SH110X_DISPLAY_ALL_ON_RESUME);
+    write_cmd(SH110X_NORMAL_DISPLAY);
+    sleep_ms(100);
+    write_cmd(SH110X_DISPLAY_ON);
+
+    // Clear framebuffer and display
+    display_clear();
+    display_update();
+
+    initialized = true;
+    printf("[display] Initialized SH1107 128x64 OLED (I2C)\n");
 }
 
 bool display_is_initialized(void) {
@@ -271,22 +286,51 @@ void display_clear(void) {
 void display_update(void) {
     if (!initialized) return;
 
-    for (uint8_t page = 0; page < 8; page++) {
-        write_cmd(SH1106_SET_PAGE_ADDR | page);
-        write_cmd(SH1106_SET_LOW_COLUMN | (SH1106_COL_OFFSET & 0x0F));
-        write_cmd(SH1106_SET_HIGH_COLUMN | (SH1106_COL_OFFSET >> 4));
-        write_data(framebuffer[page], DISPLAY_WIDTH);
+    if (rotated_panel) {
+        // SH1107: native 64x128 panel rotated 90° to landscape 128x64.
+        // Memory: 16 pages (8px each along 128-pixel axis) × 64 columns.
+        // Framebuffer is [8 pages][128 cols] for 128x64 logical layout.
+        // Transpose: logical X maps to SH1107 pages, logical Y maps to columns.
+        for (uint8_t page = 0; page < 16; page++) {
+            write_cmd(SH110X_SET_PAGE_ADDR | page);
+            write_cmd(SH110X_SET_LOW_COLUMN | (col_offset & 0x0F));
+            write_cmd(SH110X_SET_HIGH_COLUMN | (col_offset >> 4));
+
+            uint8_t page_data[64];
+            for (uint8_t col = 0; col < 64; col++) {
+                uint8_t byte = 0;
+                uint8_t y = 63 - col;  // Flip vertical to match FeatherWing orientation
+                uint8_t fb_page = y / 8;
+                uint8_t fb_bit = y % 8;
+                for (uint8_t bit = 0; bit < 8; bit++) {
+                    uint8_t x = page * 8 + bit;
+                    if (x < DISPLAY_WIDTH && (framebuffer[fb_page][x] & (1 << fb_bit))) {
+                        byte |= (1 << bit);
+                    }
+                }
+                page_data[col] = byte;
+            }
+            write_data(page_data, 64);
+        }
+    } else {
+        // SH1106: native 128x64, 8 pages × 128 columns — direct framebuffer write
+        for (uint8_t page = 0; page < 8; page++) {
+            write_cmd(SH110X_SET_PAGE_ADDR | page);
+            write_cmd(SH110X_SET_LOW_COLUMN | (col_offset & 0x0F));
+            write_cmd(SH110X_SET_HIGH_COLUMN | (col_offset >> 4));
+            write_data(framebuffer[page], DISPLAY_WIDTH);
+        }
     }
 }
 
 void display_invert(bool invert) {
     if (!initialized) return;
-    write_cmd(invert ? SH1106_INVERT_DISPLAY : SH1106_NORMAL_DISPLAY);
+    write_cmd(invert ? SH110X_INVERT_DISPLAY : SH110X_NORMAL_DISPLAY);
 }
 
 void display_set_contrast(uint8_t contrast) {
     if (!initialized) return;
-    write_cmd(SH1106_SET_CONTRAST);
+    write_cmd(SH110X_SET_CONTRAST);
     write_cmd(contrast);
 }
 
@@ -447,14 +491,14 @@ void display_marquee_add(const char* text) {
     marquee_len += add_len;
     marquee_buffer[marquee_len] = '\0';
 
-    // Calculate target offset to show text right-aligned
-    // (text grows from right edge, pushes left)
+    // Snap offset to show latest text right-aligned (no animation delay)
     uint16_t text_width = marquee_len * 6;
     if (text_width > DISPLAY_WIDTH) {
-        marquee_target_offset = text_width - DISPLAY_WIDTH;
+        marquee_offset = text_width - DISPLAY_WIDTH;
     } else {
-        marquee_target_offset = 0;
+        marquee_offset = 0;
     }
+    marquee_target_offset = marquee_offset;
 
     marquee_last_activity = now;
     marquee_visible = true;

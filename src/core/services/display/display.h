@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024 Robert Dale Smith
 //
-// SH1106 128x64 OLED display driver over SPI.
-// Used on MacroPad RP2040.
+// SH1106/SH1107 128x64 OLED display driver.
+// Supports SPI (MacroPad) and I2C (FeatherWing) transports.
 
 #ifndef DISPLAY_H
 #define DISPLAY_H
@@ -15,7 +15,7 @@
 #define DISPLAY_WIDTH  128
 #define DISPLAY_HEIGHT 64
 
-// Display pin configuration
+// SPI display pin configuration (SH1106, MacroPad)
 typedef struct {
     uint8_t spi_inst;   // SPI instance (0 or 1)
     uint8_t pin_sck;    // SPI clock
@@ -25,8 +25,19 @@ typedef struct {
     uint8_t pin_rst;    // Reset
 } display_config_t;
 
-// Initialize display with pin configuration
+// I2C display configuration (SH1107, FeatherWing)
+typedef struct {
+    uint8_t i2c_inst;   // I2C instance (0 or 1)
+    uint8_t pin_sda;    // I2C data
+    uint8_t pin_scl;    // I2C clock
+    uint8_t addr;       // I2C address (typically 0x3C)
+} display_i2c_config_t;
+
+// Initialize display over SPI (SH1106)
 void display_init(const display_config_t* config);
+
+// Initialize display over I2C (SH1107)
+void display_init_i2c(const display_i2c_config_t* config);
 
 // Clear display
 void display_clear(void);

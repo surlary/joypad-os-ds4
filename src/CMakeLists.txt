@@ -269,6 +269,7 @@ set(CONTROLLER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/pad/pad_input.c
     ${CMAKE_CURRENT_SOURCE_DIR}/core/services/speaker/speaker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display_spi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/uart/uart_device.c
     ${CMAKE_CURRENT_SOURCE_DIR}/native/host/uart/uart_host.c
 )
@@ -771,17 +772,26 @@ target_compile_definitions(joypad_usb_feather_rp2040 PRIVATE
     MAX3421_CS_PIN=10
     MAX3421_INTR_PIN=9
     USE_BOOTSEL_BUTTON=1
+    # FeatherWing OLED 128x64 (SH1107) over I2C on STEMMA QT
+    OLED_I2C_INST=1
+    OLED_I2C_SDA_PIN=2
+    OLED_I2C_SCL_PIN=3
+    OLED_I2C_ADDR=0x3C
+    OLED_BUTTON_B_PIN=6
+    OLED_BUTTON_C_PIN=5
 )
 target_sources(joypad_usb_feather_rp2040 PUBLIC
     ${COMMON_SOURCES}
     ${USB_DEVICE_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display_i2c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb/app.c
 )
 target_include_directories(joypad_usb_feather_rp2040 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb
     ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
 )
-target_link_libraries(joypad_usb_feather_rp2040 PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_max3421)
+target_link_libraries(joypad_usb_feather_rp2040 PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_max3421 hardware_i2c)
 joypad_target_common(joypad_usb_feather_rp2040)
 joypad_add_btstack(joypad_usb_feather_rp2040)
 pico_enable_stdio_uart(joypad_usb_feather_rp2040 1)

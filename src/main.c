@@ -126,6 +126,9 @@ int main(void)
   players_init();
   app_init();
 
+  // Render one LED frame before input init (which may block for seconds on MAX3421E)
+  leds_task();
+
   // Get and initialize input interfaces from app
   inputs = app_get_input_interfaces(&input_count);
   for (uint8_t i = 0; i < input_count; i++) {

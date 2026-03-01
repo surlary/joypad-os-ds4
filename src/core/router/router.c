@@ -17,10 +17,11 @@
 #endif
 
 // Device name lookup for USB HID
-#ifdef CONFIG_USB_HOST
+#ifndef DISABLE_USB_HOST
 #include "usb/usbh/hid/hid_registry.h"
 #include "tusb.h"
 extern int hid_get_ctrl_type(uint8_t dev_addr, uint8_t instance);
+extern const char* hid_get_product_name(uint8_t dev_addr);
 #endif
 
 // Device name lookup for Bluetooth
@@ -62,7 +63,7 @@ static inline bool analog_beyond_threshold(const input_event_t* event) {
 // Returns pointer to static string or device name buffer
 static const char* get_device_name(const input_event_t* event) {
     switch (event->transport) {
-#ifdef CONFIG_USB_HOST
+#ifndef DISABLE_USB_HOST
         case INPUT_TRANSPORT_USB: {
             int ctrl_type = hid_get_ctrl_type(event->dev_addr, event->instance);
             if (ctrl_type >= 0 && ctrl_type < CONTROLLER_TYPE_COUNT &&
@@ -76,6 +77,11 @@ static const char* get_device_name(const input_event_t* event) {
                     }
                 }
                 return device_interfaces[ctrl_type]->name;
+            }
+            // Fallback: USB product string (fetched at mount time)
+            const char* product = hid_get_product_name(event->dev_addr);
+            if (product && product[0]) {
+                return product;
             }
             return "USB Device";
         }

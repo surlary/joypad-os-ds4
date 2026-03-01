@@ -480,7 +480,7 @@ void usbd_get_mode_color(usb_output_mode_t mode, uint8_t *r, uint8_t *g, uint8_t
         case USB_OUTPUT_MODE_PCEMINI:
             *r = 0; *g = 0; *b = 64; break;      // blue
         case USB_OUTPUT_MODE_SINPUT:
-            *r = 32; *g = 32; *b = 32; break;    // white
+            *r = 80; *g = 80; *b = 80; break;    // white
         default: // HID, GC_ADAPTER
             *r = 6; *g = 0; *b = 64; break;      // purple
     }

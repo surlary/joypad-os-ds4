@@ -45,16 +45,23 @@
   #define CFG_TUSB_RHPORT0_MODE       OPT_MODE_DEVICE
 #elif defined(CONFIG_USB)
   // Dual-role USB configuration (host + device)
-  // Device mode on RHPORT0 (native USB), Host mode on RHPORT1 (PIO USB)
+  // Device mode on RHPORT0 (native USB), Host mode on RHPORT1
   #define CFG_TUSB_RHPORT0_MODE       OPT_MODE_DEVICE
   #define CFG_TUSB_RHPORT1_MODE       OPT_MODE_HOST
-  #define CFG_TUH_RPI_PIO_USB         1  // Enable PIO USB host driver
+  #ifdef CONFIG_MAX3421
+    #define CFG_TUH_MAX3421           1  // Enable MAX3421E SPI USB host driver
+  #else
+    #define CFG_TUH_RPI_PIO_USB       1  // Enable PIO USB host driver
+  #endif
 #else
   // Host-only mode for existing console implementations
-  #if CFG_TUSB_MCU == OPT_MCU_LPC43XX || CFG_TUSB_MCU == OPT_MCU_LPC18XX || CFG_TUSB_MCU == OPT_MCU_MIMXRT10XX
-    #define CFG_TUSB_RHPORT0_MODE       (OPT_MODE_HOST | OPT_MODE_HIGH_SPEED)
+  #ifdef CONFIG_MAX3421
+    #define CFG_TUSB_RHPORT1_MODE     OPT_MODE_HOST
+    #define CFG_TUH_MAX3421           1  // Enable MAX3421E SPI USB host driver
+  #elif CFG_TUSB_MCU == OPT_MCU_LPC43XX || CFG_TUSB_MCU == OPT_MCU_LPC18XX || CFG_TUSB_MCU == OPT_MCU_MIMXRT10XX
+    #define CFG_TUSB_RHPORT0_MODE     (OPT_MODE_HOST | OPT_MODE_HIGH_SPEED)
   #else
-    #define CFG_TUSB_RHPORT0_MODE       OPT_MODE_HOST
+    #define CFG_TUSB_RHPORT0_MODE     OPT_MODE_HOST
   #endif
 #endif
 

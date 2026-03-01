@@ -995,6 +995,48 @@ static void cmd_wiimote_orient_set(const char* json)
 #endif
 
 // ============================================================================
+// MAX3421E DIAGNOSTICS
+// ============================================================================
+
+#if defined(CONFIG_MAX3421) && CFG_TUH_MAX3421
+extern bool max3421_is_detected(void);
+extern uint8_t max3421_get_revision(void);
+extern void max3421_get_diag(uint8_t *out_hirq, uint8_t *out_mode,
+                             uint8_t *out_hrsl, uint8_t *out_int_pin);
+
+static void cmd_max3421_status(const char* json)
+{
+    (void)json;
+    bool detected = max3421_is_detected();
+    if (!detected) {
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"detected\":false}");
+        send_json(response_buf);
+        return;
+    }
+
+    uint8_t hirq, mode, hrsl, int_pin;
+    max3421_get_diag(&hirq, &mode, &hrsl, &int_pin);
+
+    // HRSL bits 7:6 = JSTATUS:KSTATUS
+    // J=1,K=0 = full-speed device; J=0,K=1 = low-speed device; both 0 = no device
+    bool j_status = (hrsl >> 7) & 1;
+    bool k_status = (hrsl >> 6) & 1;
+    const char* conn = "none";
+    if (j_status && !k_status) conn = "full-speed";
+    else if (!j_status && k_status) conn = "low-speed";
+    else if (j_status && k_status) conn = "se0";
+
+    snprintf(response_buf, sizeof(response_buf),
+             "{\"detected\":true,\"rev\":\"0x%02X\",\"hirq\":\"0x%02X\","
+             "\"mode\":\"0x%02X\",\"hrsl\":\"0x%02X\",\"int_pin\":%d,"
+             "\"connection\":\"%s\"}",
+             max3421_get_revision(), hirq, mode, hrsl, int_pin, conn);
+    send_json(response_buf);
+}
+#endif
+
+// ============================================================================
 // PLAYER MANAGEMENT
 // ============================================================================
 
@@ -1256,6 +1298,9 @@ static const cmd_entry_t commands[] = {
     // Rumble testing
     {"RUMBLE.TEST", cmd_rumble_test},
     {"RUMBLE.STOP", cmd_rumble_stop},
+#if defined(CONFIG_MAX3421) && CFG_TUH_MAX3421
+    {"MAX3421.STATUS", cmd_max3421_status},
+#endif
 #ifdef ENABLE_BTSTACK
     {"BT.STATUS", cmd_bt_status},
     {"BT.BONDS.CLEAR", cmd_bt_bonds_clear},

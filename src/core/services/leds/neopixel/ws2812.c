@@ -513,8 +513,8 @@ void neopixel_task(int pat)
             if (pat == 0) {
                 // Pulse: triangle wave brightness (tic cycles 0-199)
                 int phase = tic % 200;
-                int bright = phase < 100 ? (30 + phase * 2) : (30 + (200 - phase) * 2);
-                // bright ranges 30-230, scale override color
+                int bright = phase < 100 ? (100 + phase) : (100 + (200 - phase));
+                // bright ranges 100-200, visible on 3.3V NeoPixels
                 for (uint i = 0; i < NUM_PIXELS; ++i) {
                     put_pixel(urgb_u32(
                         (override_r * bright) / 255,

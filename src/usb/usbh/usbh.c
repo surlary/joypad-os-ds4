@@ -9,7 +9,12 @@
 #include "core/services/codes/codes.h"
 #include <stdio.h>
 
-#if defined(CONFIG_USB) && CFG_TUH_RPI_PIO_USB
+#if defined(CONFIG_MAX3421) && CFG_TUH_MAX3421
+extern bool max3421_host_init(void);
+extern void max3421_host_enable_int(void);
+extern bool max3421_is_detected(void);
+extern uint8_t max3421_get_revision(void);
+#elif defined(CONFIG_USB) && CFG_TUH_RPI_PIO_USB
 #include "pio_usb.h"
 #include "hardware/gpio.h"
 #endif
@@ -53,7 +58,21 @@ void usbh_init(void)
 
     hid_init();
 
-#if defined(CONFIG_USB) && CFG_TUH_RPI_PIO_USB
+#if defined(CONFIG_MAX3421) && CFG_TUH_MAX3421
+    // MAX3421E SPI USB host on rhport 1
+    if (max3421_host_init()) {
+        tusb_rhport_init_t host_init = {
+            .role = TUSB_ROLE_HOST,
+            .speed = TUSB_SPEED_FULL
+        };
+        tusb_init(1, &host_init);
+        // Enable INT pin interrupt AFTER tusb_init configures the chip,
+        // otherwise a floating INT pin causes interrupt storm
+        max3421_host_enable_int();
+    } else {
+        printf("[usbh] MAX3421E not detected, USB host disabled\n");
+    }
+#elif defined(CONFIG_USB) && CFG_TUH_RPI_PIO_USB
     // Dual USB mode: Host on rhport 1 (PIO USB for boards with separate host port)
 
 #ifdef PIO_USB_VBUS_PIN
@@ -115,6 +134,7 @@ void usbh_init(void)
 
 void usbh_task(void)
 {
+
     // TinyUSB host polling
     tuh_task();
 
