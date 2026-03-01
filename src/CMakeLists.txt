@@ -66,6 +66,15 @@ if(EXISTS ${PICO_PIO_USB_PATH})
     pico_generate_pio_header(tinyusb_pico_pio_usb ${PICO_PIO_USB_PATH}/src/usb_rx.pio)
 endif()
 
+# MAX3421E SPI USB Host (alternative to PIO USB)
+add_library(tinyusb_max3421 INTERFACE)
+target_sources(tinyusb_max3421 INTERFACE
+    ${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb/src/portable/analog/max3421/hcd_max3421.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbh/max3421_host.c
+)
+target_link_libraries(tinyusb_max3421 INTERFACE hardware_spi)
+target_compile_definitions(tinyusb_max3421 INTERFACE CONFIG_MAX3421=1)
+
 # ============================================================================
 # SOURCE LISTS
 # ============================================================================
@@ -712,10 +721,14 @@ joypad_add_btstack(joypad_uart)
 # ============================================================================
 # USB HOST TO USB DEVICE APPS (USB input -> USB output)
 # ============================================================================
+# USB Host Methods:
+#   PIO-USB (tinyusb_pico_pio_usb) - Software USB host via PIO, uses 2 GPIOs
+#   MAX3421E (tinyusb_max3421)     - SPI USB host IC, uses SPI bus + CS + INT pins
+#   Native (tinyusb_host)          - RP2040's built-in USB, only when no device output needed
 
-# --- USB to USB (Feather USB Host) ---
-add_executable(joypad_usb)
-target_compile_definitions(joypad_usb PRIVATE
+# --- USB to USB (Feather RP2040 USB Host #5723, PIO-USB) ---
+add_executable(joypad_usb_feather_rp2040_usb_host)
+target_compile_definitions(joypad_usb_feather_rp2040_usb_host PRIVATE
     CONFIG_USB=1
     PICO_DEFAULT_PIO_USB_DP_PIN=16
     PICO_DEFAULT_PIO_USB_VBUSEN_PIN=18
@@ -726,21 +739,54 @@ target_compile_definitions(joypad_usb PRIVATE
     PICO_DEFAULT_UART_TX_PIN=0
     PICO_DEFAULT_UART_RX_PIN=1
 )
-target_sources(joypad_usb PUBLIC
+target_sources(joypad_usb_feather_rp2040_usb_host PUBLIC
     ${COMMON_SOURCES}
     ${USB_DEVICE_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb/app.c
 )
-target_include_directories(joypad_usb PUBLIC
+target_include_directories(joypad_usb_feather_rp2040_usb_host PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb
     ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
 )
-target_link_libraries(joypad_usb PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_pico_pio_usb)
-joypad_target_common(joypad_usb)
-joypad_add_btstack(joypad_usb)
-pico_enable_stdio_uart(joypad_usb 1)
+target_link_libraries(joypad_usb_feather_rp2040_usb_host PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_pico_pio_usb)
+joypad_target_common(joypad_usb_feather_rp2040_usb_host)
+joypad_add_btstack(joypad_usb_feather_rp2040_usb_host)
+pico_enable_stdio_uart(joypad_usb_feather_rp2040_usb_host 1)
 
-# --- USB to USB (Raspberry Pi Pico) ---
+# --- USB to USB (Feather RP2040 #4884 + MAX3421E USB Host FeatherWing #5858) ---
+# MAX3421E pin defines for TinyUSB family.c BSP + max3421_host.c init
+# FeatherWing SPI on Feather header: SPI0 (SCK=18, MOSI=19, MISO=20), CS=10, INT=9
+add_executable(joypad_usb_feather_rp2040)
+target_compile_definitions(joypad_usb_feather_rp2040 PRIVATE
+    CONFIG_USB=1
+    BOARD_TUH_RHPORT=1
+    USBR_CDC_DEBUG=1
+    PICO_DEFAULT_UART=0
+    PICO_DEFAULT_UART_TX_PIN=0
+    PICO_DEFAULT_UART_RX_PIN=1
+    MAX3421_SPI=spi0
+    MAX3421_SCK_PIN=18
+    MAX3421_MOSI_PIN=19
+    MAX3421_MISO_PIN=20
+    MAX3421_CS_PIN=10
+    MAX3421_INTR_PIN=9
+    USE_BOOTSEL_BUTTON=1
+)
+target_sources(joypad_usb_feather_rp2040 PUBLIC
+    ${COMMON_SOURCES}
+    ${USB_DEVICE_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb/app.c
+)
+target_include_directories(joypad_usb_feather_rp2040 PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+)
+target_link_libraries(joypad_usb_feather_rp2040 PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_max3421)
+joypad_target_common(joypad_usb_feather_rp2040)
+joypad_add_btstack(joypad_usb_feather_rp2040)
+pico_enable_stdio_uart(joypad_usb_feather_rp2040 1)
+
+# --- USB to USB (Raspberry Pi Pico, PIO-USB) ---
 # PIO USB host on GP16/GP17 (default), standard LED on GP25
 add_executable(joypad_usb_pico)
 target_compile_definitions(joypad_usb_pico PRIVATE
@@ -760,7 +806,7 @@ target_link_libraries(joypad_usb_pico PRIVATE ${COMMON_LIBRARIES} tinyusb_device
 joypad_target_common(joypad_usb_pico)
 joypad_add_btstack(joypad_usb_pico)
 
-# --- USB to USB (Raspberry Pi Pico W) ---
+# --- USB to USB (Raspberry Pi Pico W, PIO-USB) ---
 # PIO USB host on GP16/GP17, no WS2812, LED behind CYW43
 add_executable(joypad_usb_pico_w)
 target_compile_definitions(joypad_usb_pico_w PRIVATE
@@ -780,7 +826,7 @@ target_link_libraries(joypad_usb_pico_w PRIVATE ${COMMON_LIBRARIES} tinyusb_devi
 joypad_target_common(joypad_usb_pico_w)
 joypad_add_btstack(joypad_usb_pico_w)
 
-# --- USB to USB (Raspberry Pi Pico 2 W) ---
+# --- USB to USB (Raspberry Pi Pico 2 W, PIO-USB) ---
 # PIO USB host on GP16/GP17, no WS2812, LED behind CYW43
 add_executable(joypad_usb_pico2_w)
 target_compile_definitions(joypad_usb_pico2_w PRIVATE
@@ -800,7 +846,7 @@ target_link_libraries(joypad_usb_pico2_w PRIVATE ${COMMON_LIBRARIES} tinyusb_dev
 joypad_target_common(joypad_usb_pico2_w)
 joypad_add_btstack(joypad_usb_pico2_w)
 
-# --- USB to USB (RP2040-Zero) ---
+# --- USB to USB (RP2040-Zero, PIO-USB) ---
 add_executable(joypad_usb_rp2040zero)
 target_compile_definitions(joypad_usb_rp2040zero PRIVATE
     CONFIG_USB=1
@@ -821,7 +867,7 @@ target_link_libraries(joypad_usb_rp2040zero PRIVATE ${COMMON_LIBRARIES} tinyusb_
 joypad_target_common(joypad_usb_rp2040zero)
 joypad_add_btstack(joypad_usb_rp2040zero)
 
-# --- USB to USB (Waveshare RP2350A) ---
+# --- USB to USB (Waveshare RP2350A, PIO-USB) ---
 add_executable(joypad_usb_rp2350usba)
 target_compile_definitions(joypad_usb_rp2350usba PRIVATE
     CONFIG_USB=1
