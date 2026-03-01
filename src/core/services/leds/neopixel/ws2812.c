@@ -71,6 +71,12 @@ static absolute_time_t state_change_time;
 static uint8_t custom_led_colors[16][3];  // [led_index][R, G, B]
 static bool use_custom_colors = false;
 
+// Per-LED pulse mask for breathing animation
+static uint16_t led_pulse_mask = 0;
+
+// Per-LED press mask (pressed keys show bright white)
+static uint16_t led_press_mask = 0;
+
 // Override color for mode indication (set via neopixel_set_override_color)
 static uint8_t override_r = 0, override_g = 0, override_b = 0;
 static bool has_override_color = false;
@@ -286,12 +292,37 @@ void pattern_brgpy(uint len, uint t) {
     }
 }
 
+// Breathing brightness scale (0-255) from phase within cycle
+// Smooth ramp up/down with quadratic easing, ~3s cycle
+static inline uint8_t breathing_scale(uint t) {
+    int phase = t % 300;  // ~3s cycle at 10ms per tic
+    // Triangle wave 0→150→0
+    int ramp = phase < 150 ? phase : (300 - phase);
+    // Quadratic easing: slow at extremes, fast in middle
+    // Range: 8 (dim glow) to 255 (full bright)
+    return 8 + (uint8_t)((uint32_t)ramp * ramp * 247 / 22500);
+}
+
 // Custom colors pattern - uses colors set via neopixel_set_custom_colors()
+// Priority: pressed (white) > breathing pulse > solid color
 void pattern_custom(uint len, uint t) {
     for (uint i = 0; i < len && i < 16; ++i) {
-        put_pixel(urgb_u32(custom_led_colors[i][0],
-                          custom_led_colors[i][1],
-                          custom_led_colors[i][2]));
+        if (led_press_mask & (1 << i)) {
+            // Pressed: bright white
+            put_pixel(urgb_u32(255, 255, 255));
+        } else if (led_pulse_mask & (1 << i)) {
+            // Breathing pulse
+            uint8_t s = breathing_scale(t);
+            put_pixel(urgb_u32(
+                (custom_led_colors[i][0] * s) / 255,
+                (custom_led_colors[i][1] * s) / 255,
+                (custom_led_colors[i][2] * s) / 255));
+        } else {
+            // Solid
+            put_pixel(urgb_u32(custom_led_colors[i][0],
+                              custom_led_colors[i][1],
+                              custom_led_colors[i][2]));
+        }
     }
 }
 
@@ -313,6 +344,16 @@ void neopixel_set_custom_colors(const uint8_t colors[][3], uint8_t count) {
 // Check if custom colors are active
 bool neopixel_has_custom_colors(void) {
     return use_custom_colors;
+}
+
+// Set bitmask of LEDs that pulse with breathing animation
+void neopixel_set_pulse_mask(uint16_t mask) {
+    led_pulse_mask = mask;
+}
+
+// Set bitmask of currently pressed LEDs (shown as bright white)
+void neopixel_set_press_mask(uint16_t mask) {
+    led_press_mask = mask;
 }
 
 // Set override color for mode indication

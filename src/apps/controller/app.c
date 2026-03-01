@@ -110,27 +110,9 @@ static void on_button_event(button_event_t event)
             sleep_ms(50);
             tud_task();
 
-            // Cycle to next mode: HID → XInput → PS3 → PS4 → Switch → HID
+            // Cycle to next mode using usbd's built-in cycle
             usb_output_mode_t current = usbd_get_mode();
-            usb_output_mode_t next;
-            switch (current) {
-                case USB_OUTPUT_MODE_HID:
-                    next = USB_OUTPUT_MODE_XINPUT;
-                    break;
-                case USB_OUTPUT_MODE_XINPUT:
-                    next = USB_OUTPUT_MODE_PS3;
-                    break;
-                case USB_OUTPUT_MODE_PS3:
-                    next = USB_OUTPUT_MODE_PS4;
-                    break;
-                case USB_OUTPUT_MODE_PS4:
-                    next = USB_OUTPUT_MODE_SWITCH;
-                    break;
-                case USB_OUTPUT_MODE_SWITCH:
-                default:
-                    next = USB_OUTPUT_MODE_HID;
-                    break;
-            }
+            usb_output_mode_t next = usbd_get_next_mode();
             printf("[app:controller] Switching from %s to %s\n",
                    usbd_get_mode_name(current), usbd_get_mode_name(next));
             tud_task();
@@ -402,18 +384,46 @@ void app_task(void)
     // Process button input for mode switching
     button_task();
 
-    // Update LED color when USB output mode changes
-    static usb_output_mode_t last_led_mode = USB_OUTPUT_MODE_COUNT;
-    usb_output_mode_t mode = usbd_get_mode();
-    if (mode != last_led_mode) {
-        uint8_t r, g, b;
-        usbd_get_mode_color(mode, &r, &g, &b);
-        leds_set_color(r, g, b);
-        last_led_mode = mode;
+    // Update LED colors when USB output mode changes
+    {
+        static usb_output_mode_t last_led_mode = USB_OUTPUT_MODE_COUNT;
+        usb_output_mode_t mode = usbd_get_mode();
+        if (mode != last_led_mode) {
+            last_led_mode = mode;
+            uint8_t r, g, b;
+            usbd_get_mode_color(mode, &r, &g, &b);
+            if (PAD_CONFIG.led_count > 1) {
+                // Multi-LED: set all LEDs to mode color, enable pulse mask
+                uint8_t colors[16][3];
+                for (int i = 0; i < PAD_CONFIG.led_count && i < 16; i++) {
+                    colors[i][0] = r;
+                    colors[i][1] = g;
+                    colors[i][2] = b;
+                }
+                neopixel_set_custom_colors(colors, PAD_CONFIG.led_count);
+                neopixel_set_pulse_mask(PAD_CONFIG.led_pulse_mask);
+            } else if (!neopixel_has_custom_colors()) {
+                // Single LED: use override color
+                leds_set_color(r, g, b);
+            }
+        }
+    }
+
+    // Get current button state from router output (read ONCE, share with all consumers)
+    // Persist across frames since router_get_output returns NULL when no new data
+    static uint32_t buttons = 0;
+    static uint32_t prev_buttons = 0;
+    const input_event_t* event = router_get_output(OUTPUT_TARGET_USB_DEVICE, 0);
+    if (event) {
+        buttons = event->buttons;
+    }
+    if (buttons != prev_buttons) {
+        printf("[app:controller] buttons=0x%08lx\n", (unsigned long)buttons);
+        prev_buttons = buttons;
     }
 
     // Process codes detection (Konami code, etc.)
-    codes_task_for_output(OUTPUT_TARGET_USB_DEVICE);
+    codes_process_raw(buttons);
 
     // Process UART link communication (if enabled)
     if (uart_link_enabled) {
@@ -432,11 +442,15 @@ void app_task(void)
         speaker_set_rumble(rumble);
     }
 
-    // Get current button state from router output
-    uint32_t buttons = 0xFFFFFFFF;  // All released (active-low)
-    const input_event_t* event = router_get_output(OUTPUT_TARGET_USB_DEVICE, 0);
-    if (event) {
-        buttons = event->buttons;
+    // Update LED press mask from button state
+    if (PAD_CONFIG.led_button_map[0]) {
+        uint16_t press_mask = 0;
+        for (int i = 0; i < PAD_CONFIG.led_count && i < 16; i++) {
+            if (PAD_CONFIG.led_button_map[i] && (buttons & PAD_CONFIG.led_button_map[i])) {
+                press_mask |= (1 << i);
+            }
+        }
+        neopixel_set_press_mask(press_mask);
     }
 
     // Update display

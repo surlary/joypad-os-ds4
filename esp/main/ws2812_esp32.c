@@ -37,6 +37,16 @@ bool neopixel_has_custom_colors(void)
     return false;
 }
 
+void neopixel_set_pulse_mask(uint16_t mask)
+{
+    (void)mask;
+}
+
+void neopixel_set_press_mask(uint16_t mask)
+{
+    (void)mask;
+}
+
 void neopixel_set_override_color(uint8_t r, uint8_t g, uint8_t b)
 {
     (void)r; (void)g; (void)b;

@@ -16,6 +16,7 @@
 #define PAD_CONFIG_MACROPAD_H
 
 #include "../pad_input.h"
+#include "core/buttons.h"
 
 // User button: Rotary encoder button (GPIO 0)
 // Set via BUTTON_USER_GPIO=0 in CMakeLists.txt
@@ -75,6 +76,9 @@ static const pad_device_config_t pad_config_macropad = {
     .l4 = PAD_PIN_DISABLED,
     .r4 = PAD_PIN_DISABLED,
 
+    // No toggle switch (dpad always digital)
+    .dpad_toggle = PAD_PIN_DISABLED,
+
     // No analog sticks
     .adc_lx = PAD_PIN_DISABLED,
     .adc_ly = PAD_PIN_DISABLED,
@@ -112,6 +116,25 @@ static const pad_device_config_t pad_config_macropad = {
         { 32,  32,  32},  // Key 10: Start   - White (Meta)
         { 64,   0,   0},  // Key 11: B       - Red (Xbox B)
         { 64,  64,   0},  // Key 12: Y       - Yellow (Xbox Y)
+    },
+
+    // D-pad LEDs pulse with breathing animation
+    .led_pulse_mask = (1<<0) | (1<<3) | (1<<4) | (1<<6),
+
+    // Button-to-LED mapping (pressed keys flash white)
+    .led_button_map = {
+        JP_BUTTON_DL,  //  0: Key 1  D-Left
+        JP_BUTTON_S1,  //  1: Key 2  Select
+        JP_BUTTON_L1,  //  2: Key 3  L1
+        JP_BUTTON_DD,  //  3: Key 4  D-Down
+        JP_BUTTON_DU,  //  4: Key 5  D-Up
+        JP_BUTTON_R1,  //  5: Key 6  R1
+        JP_BUTTON_DR,  //  6: Key 7  D-Right
+        JP_BUTTON_B1,  //  7: Key 8  A
+        JP_BUTTON_B3,  //  8: Key 9  X
+        JP_BUTTON_S2,  //  9: Key 10 Start
+        JP_BUTTON_B2,  // 10: Key 11 B
+        JP_BUTTON_B4,  // 11: Key 12 Y
     },
 
     // Speaker for haptic/rumble feedback

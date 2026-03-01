@@ -42,6 +42,19 @@ static input_event_t pad_events[PAD_MAX_DEVICES];
 // Debounce state (simple: require 2 consecutive reads)
 static uint32_t pad_prev_buttons[PAD_MAX_DEVICES];
 
+// D-pad mode (software, set via S1+S2+direction hotkeys)
+typedef enum {
+    DPAD_MODE_DPAD,        // D-pad → d-pad buttons (default)
+    DPAD_MODE_LEFT_STICK,  // D-pad → left analog stick
+    DPAD_MODE_RIGHT_STICK, // D-pad → right analog stick
+} dpad_mode_t;
+
+static dpad_mode_t dpad_mode = DPAD_MODE_DPAD;
+
+// S1+S2 combo state
+static bool prev_s1s2_held = false;
+static bool combo_used = false;
+
 // ADC initialized flag
 static bool adc_initialized = false;
 
@@ -288,39 +301,11 @@ static void pad_poll_device(uint8_t device_index) {
     // Read buttons into bitmap
     uint32_t buttons = 0;
 
-    // Check toggle switch state (LOW = D-pad mode, HIGH = right analog mode)
-    bool dpad_mode = true;  // Default to D-pad mode
-    if (config->dpad_toggle >= 0 && config->dpad_toggle <= 29) {
-        dpad_mode = !gpio_get(config->dpad_toggle);  // Inverted: LOW = D-pad, HIGH = analog
-    }
-
-    // Read D-pad buttons
-    bool dpad_up = pad_read_button(config->dpad_up, ah);
-    bool dpad_down = pad_read_button(config->dpad_down, ah);
-    bool dpad_left = pad_read_button(config->dpad_left, ah);
-    bool dpad_right = pad_read_button(config->dpad_right, ah);
-
-    if (dpad_mode) {
-        // D-pad mode: output as digital buttons
-        if (dpad_up)    buttons |= JP_BUTTON_DU;
-        if (dpad_down)  buttons |= JP_BUTTON_DD;
-        if (dpad_left)  buttons |= JP_BUTTON_DL;
-        if (dpad_right) buttons |= JP_BUTTON_DR;
-    } else {
-        // Analog mode: output D-pad as right stick
-        // X axis: left = 0, center = 128, right = 255
-        // Y axis: up = 255, center = 128, down = 0
-        uint8_t rx = 128, ry = 128;
-
-        if (dpad_left && !dpad_right) rx = 0;
-        else if (dpad_right && !dpad_left) rx = 255;
-
-        if (dpad_up && !dpad_down) ry = 255;
-        else if (dpad_down && !dpad_up) ry = 0;
-
-        event->analog[ANALOG_RX] = rx;   // Right stick X
-        event->analog[ANALOG_RY] = ry;  // Right stick Y
-    }
+    // Always read D-pad as digital buttons first
+    if (pad_read_button(config->dpad_up, ah))    buttons |= JP_BUTTON_DU;
+    if (pad_read_button(config->dpad_down, ah))  buttons |= JP_BUTTON_DD;
+    if (pad_read_button(config->dpad_left, ah))  buttons |= JP_BUTTON_DL;
+    if (pad_read_button(config->dpad_right, ah)) buttons |= JP_BUTTON_DR;
 
     // Face buttons
     if (pad_read_button(config->b1, ah)) buttons |= JP_BUTTON_B1;
@@ -352,7 +337,86 @@ static void pad_poll_device(uint8_t device_index) {
     }
     pad_prev_buttons[device_index] = buttons;
 
-    // Read analog sticks
+    // =================================================================
+    // S1+S2 combo detection (Home button + d-pad mode switching)
+    // S1+S2 alone: inject A1 (Home) continuously
+    // S1+S2 + Down:  d-pad mode (default)
+    // S1+S2 + Left:  d-pad → left analog stick
+    // S1+S2 + Right: d-pad → right analog stick
+    // =================================================================
+    bool s1s2_held = (event->buttons & (JP_BUTTON_S1 | JP_BUTTON_S2)) == (JP_BUTTON_S1 | JP_BUTTON_S2);
+
+    if (s1s2_held) {
+        if (!prev_s1s2_held) {
+            combo_used = false;
+        }
+
+        uint32_t dpad_bits = event->buttons & (JP_BUTTON_DU | JP_BUTTON_DD | JP_BUTTON_DL | JP_BUTTON_DR);
+        uint32_t other_bits = event->buttons & ~(JP_BUTTON_S1 | JP_BUTTON_S2 | JP_BUTTON_DU | JP_BUTTON_DD | JP_BUTTON_DL | JP_BUTTON_DR);
+
+        // Check for d-pad mode switch (only fire once per hold)
+        if (!combo_used && dpad_bits) {
+            if (dpad_bits == JP_BUTTON_DD) {
+                dpad_mode = DPAD_MODE_DPAD;
+                printf("[pad] D-pad mode: D-PAD (default)\n");
+                combo_used = true;
+            } else if (dpad_bits == JP_BUTTON_DL) {
+                dpad_mode = DPAD_MODE_LEFT_STICK;
+                printf("[pad] D-pad mode: LEFT STICK\n");
+                combo_used = true;
+            } else if (dpad_bits == JP_BUTTON_DR) {
+                dpad_mode = DPAD_MODE_RIGHT_STICK;
+                printf("[pad] D-pad mode: RIGHT STICK\n");
+                combo_used = true;
+            }
+        }
+
+        prev_s1s2_held = true;
+
+        if (!combo_used && !other_bits) {
+            // S1+S2 alone → inject Home
+            event->buttons = JP_BUTTON_A1;
+        } else {
+            // Direction combo or other buttons — suppress all output
+            event->buttons = 0;
+        }
+    } else if (prev_s1s2_held) {
+        prev_s1s2_held = false;
+    }
+
+    // =================================================================
+    // Apply d-pad mode (remap d-pad to analog stick if needed)
+    // Physical toggle switch overrides software mode to right stick
+    // =================================================================
+    dpad_mode_t effective_mode = dpad_mode;
+
+    // Physical toggle switch: when HIGH, force right stick mode
+    if (config->dpad_toggle >= 0 && config->dpad_toggle <= 29) {
+        if (gpio_get(config->dpad_toggle)) {
+            effective_mode = DPAD_MODE_RIGHT_STICK;
+        }
+    }
+
+    if (effective_mode != DPAD_MODE_DPAD) {
+        uint32_t dpad_bits = event->buttons & (JP_BUTTON_DU | JP_BUTTON_DD | JP_BUTTON_DL | JP_BUTTON_DR);
+        event->buttons &= ~(JP_BUTTON_DU | JP_BUTTON_DD | JP_BUTTON_DL | JP_BUTTON_DR);
+
+        uint8_t ax = 128, ay = 128;
+        if (dpad_bits & JP_BUTTON_DL) ax = 0;
+        else if (dpad_bits & JP_BUTTON_DR) ax = 255;
+        if (dpad_bits & JP_BUTTON_DU) ay = 0;
+        else if (dpad_bits & JP_BUTTON_DD) ay = 255;
+
+        if (effective_mode == DPAD_MODE_LEFT_STICK) {
+            event->analog[ANALOG_LX] = ax;
+            event->analog[ANALOG_LY] = ay;
+        } else {
+            event->analog[ANALOG_RX] = ax;
+            event->analog[ANALOG_RY] = ay;
+        }
+    }
+
+    // Read analog sticks (ADC overrides dpad-to-stick if both present)
     uint8_t dz = config->deadzone;
 
     if (config->adc_lx >= 0) {

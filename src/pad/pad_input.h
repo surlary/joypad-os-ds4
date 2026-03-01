@@ -109,6 +109,14 @@ typedef struct {
     // If led_colors is NULL or all zeros, uses default pattern
     uint8_t led_colors[16][3];  // [led_index][R, G, B]
 
+    // Bitmask of LEDs that pulse with breathing animation
+    // bit N = LED N pulses, 0 = all LEDs solid
+    uint16_t led_pulse_mask;
+
+    // Button-to-LED mapping: JP_BUTTON_* value for each LED index
+    // When non-zero, pressed buttons override that LED to bright white
+    uint32_t led_button_map[16];
+
     // Speaker/buzzer configuration (for haptic feedback)
     int8_t speaker_pin;         // PWM output pin (PAD_PIN_DISABLED = not used)
     int8_t speaker_enable_pin;  // Speaker enable/shutdown pin (PAD_PIN_DISABLED = always on)
