@@ -389,8 +389,8 @@ static void update_display(uint8_t rumble, uint32_t buttons)
         if (peer_status_valid && (peer_status.flags & I2C_PEER_FLAG_CONNECTED) &&
             (peer_status.flags & I2C_PEER_FLAG_NAME_VALID)) {
             display_text(4, 28, peer_status.name);
-        } else if (peer_status_valid && !(peer_status.flags & I2C_PEER_FLAG_CONNECTED)) {
-            display_text(4, 28, "No controller");
+        } else if (peer_status_valid) {
+            // No controller connected on master — leave blank
         } else {
 #endif
         // Draw labels
