@@ -87,7 +87,7 @@ static bool has_override_color = false;
 #define BLINK_ON_TIME_US 100000   // 100ms LED on (brief flash between OFF blinks)
 
 static inline void put_pixel(uint32_t pixel_grb) {
-    pio_sm_put(pio, sm, pixel_grb << 8u);
+    pio_sm_put_blocking(pio, sm, pixel_grb << 8u);
 }
 
 static inline uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b) {
