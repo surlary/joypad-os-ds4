@@ -76,6 +76,7 @@ CONSOLE_snes3do := joypad_snes3do
 CONSOLE_uart := joypad_uart
 CONSOLE_usb_feather_rp2040_usb_host := joypad_usb_feather_rp2040_usb_host
 CONSOLE_usb_feather_rp2040 := joypad_usb_feather_rp2040
+CONSOLE_usb_feather_rp2040_usb_host_max3421 := joypad_usb_feather_rp2040_usb_host_max3421
 CONSOLE_usb_rp2040zero := joypad_usb_rp2040zero
 CONSOLE_usb_rp2350usba := joypad_usb_rp2350usba
 CONSOLE_bt2usb := joypad_bt2usb
@@ -119,6 +120,7 @@ APP_usb2usb_pico_w := pico_w usb_pico_w usb2usb_pico_w USB/BT USB
 APP_usb2usb_pico2_w := pico2_w usb_pico2_w usb2usb_pico2_w USB/BT USB
 APP_usb2usb_feather_rp2040_usb_host := feather_usbhost usb_feather_rp2040_usb_host usb2usb_feather_rp2040_usb_host USB/BT USB
 APP_usb2usb_feather_rp2040 := feather usb_feather_rp2040 usb2usb_feather_rp2040 USB/BT USB
+APP_usb2usb_feather_rp2040_usb_host_max3421 := feather_usbhost usb_feather_rp2040_usb_host_max3421 usb2usb_feather_rp2040_usb_host_max3421 USB/BT USB
 APP_usb2usb_rp2040zero := rp2040zero usb_rp2040zero usb2usb_rp2040zero USB/BT USB
 APP_usb2usb_rp2350usba := rp2350usba usb_rp2350usba usb2usb_rp2350usba USB/BT USB
 APP_bt2usb_pico_w := pico_w bt2usb bt2usb_pico_w Bluetooth USB
@@ -203,6 +205,7 @@ help:
 	@echo "  make usb2usb_pico2_w    - USB/BT -> USB HID (Pi Pico 2 W)"
 	@echo "  make usb2usb_feather_rp2040_usb_host - USB/BT -> USB HID (Feather RP2040 USB Host)"
 	@echo "  make usb2usb_feather_rp2040 - USB/BT -> USB HID (Feather RP2040 + MAX3421E FeatherWing)"
+	@echo "  make usb2usb_feather_rp2040_usb_host_max3421 - USB/BT -> USB HID (Feather RP2040 USB Host + MAX3421E FeatherWing)"
 	@echo "  make usb2usb_rp2040zero - USB/BT -> USB HID (RP2040-Zero)"
 	@echo "  make usb2usb_rp2350usba - USB/BT -> USB HID (Waveshare RP2350A)"
 	@echo "  make bt2usb_pico_w      - Bluetooth -> USB HID (Pico W)"
@@ -390,6 +393,10 @@ usb2usb_feather_rp2040_usb_host:
 .PHONY: usb2usb_feather_rp2040
 usb2usb_feather_rp2040:
 	$(call build_app,usb2usb_feather_rp2040)
+
+.PHONY: usb2usb_feather_rp2040_usb_host_max3421
+usb2usb_feather_rp2040_usb_host_max3421:
+	$(call build_app,usb2usb_feather_rp2040_usb_host_max3421)
 
 .PHONY: usb2usb_rp2040zero
 usb2usb_rp2040zero:
@@ -711,6 +718,10 @@ flash-usb2usb_feather_rp2040_usb_host:
 .PHONY: flash-usb2usb_feather_rp2040
 flash-usb2usb_feather_rp2040:
 	@$(MAKE) --no-print-directory _flash_app APP_NAME=usb2usb_feather_rp2040
+
+.PHONY: flash-usb2usb_feather_rp2040_usb_host_max3421
+flash-usb2usb_feather_rp2040_usb_host_max3421:
+	@$(MAKE) --no-print-directory _flash_app APP_NAME=usb2usb_feather_rp2040_usb_host_max3421
 
 .PHONY: flash-usb2usb_rp2040zero
 flash-usb2usb_rp2040zero:

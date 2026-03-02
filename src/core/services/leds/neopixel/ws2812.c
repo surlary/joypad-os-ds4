@@ -308,8 +308,8 @@ static inline uint8_t breathing_scale(uint t) {
 void pattern_custom(uint len, uint t) {
     for (uint i = 0; i < len && i < 16; ++i) {
         if (led_press_mask & (1 << i)) {
-            // Pressed: bright white
-            put_pixel(urgb_u32(255, 255, 255));
+            // Pressed: white (capped to limit current draw on USB-powered boards)
+            put_pixel(urgb_u32(128, 128, 128));
         } else if (led_pulse_mask & (1 << i)) {
             // Breathing pulse
             uint8_t s = breathing_scale(t);

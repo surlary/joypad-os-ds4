@@ -796,6 +796,47 @@ joypad_target_common(joypad_usb_feather_rp2040)
 joypad_add_btstack(joypad_usb_feather_rp2040)
 pico_enable_stdio_uart(joypad_usb_feather_rp2040 1)
 
+# --- USB to USB (Feather RP2040 USB Host #5723 + MAX3421E USB Host FeatherWing #5858) ---
+# Uses MAX3421E FeatherWing instead of onboard PIO USB host.
+# Board SPI1: SCK=14, MOSI=15, MISO=8. NeoPixel on GPIO 21 (power gate GPIO 20).
+add_executable(joypad_usb_feather_rp2040_usb_host_max3421)
+target_compile_definitions(joypad_usb_feather_rp2040_usb_host_max3421 PRIVATE
+    CONFIG_USB=1
+    BOARD_TUH_RHPORT=1
+    USBR_CDC_DEBUG=1
+    PICO_DEFAULT_UART=0
+    PICO_DEFAULT_UART_TX_PIN=0
+    PICO_DEFAULT_UART_RX_PIN=1
+    MAX3421_SPI=spi1
+    MAX3421_SCK_PIN=14
+    MAX3421_MOSI_PIN=15
+    MAX3421_MISO_PIN=8
+    MAX3421_CS_PIN=10
+    MAX3421_INTR_PIN=9
+    # FeatherWing OLED 128x64 (SH1107) over I2C on STEMMA QT
+    OLED_I2C_INST=1
+    OLED_I2C_SDA_PIN=2
+    OLED_I2C_SCL_PIN=3
+    OLED_I2C_ADDR=0x3C
+    OLED_BUTTON_B_PIN=6
+    OLED_BUTTON_C_PIN=5
+)
+target_sources(joypad_usb_feather_rp2040_usb_host_max3421 PUBLIC
+    ${COMMON_SOURCES}
+    ${USB_DEVICE_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/services/display/display_i2c.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb/app.c
+)
+target_include_directories(joypad_usb_feather_rp2040_usb_host_max3421 PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb
+    ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+)
+target_link_libraries(joypad_usb_feather_rp2040_usb_host_max3421 PRIVATE ${COMMON_LIBRARIES} tinyusb_device tinyusb_max3421 hardware_i2c)
+joypad_target_common(joypad_usb_feather_rp2040_usb_host_max3421)
+joypad_add_btstack(joypad_usb_feather_rp2040_usb_host_max3421)
+pico_enable_stdio_uart(joypad_usb_feather_rp2040_usb_host_max3421 1)
+
 # --- USB to USB (Raspberry Pi Pico, PIO-USB) ---
 # PIO USB host on GP16/GP17 (default), standard LED on GP25
 add_executable(joypad_usb_pico)
