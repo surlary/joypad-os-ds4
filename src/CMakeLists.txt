@@ -1101,6 +1101,55 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
     pico_enable_stdio_uart(joypad_bt2n64 1)
     pico_generate_pio_header(joypad_bt2n64 ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
 
+    # --- BT+USB to USB (Pico W / Pico 2 W: PIO-USB host + CYW43 Bluetooth + USB device) ---
+    # Combines USB host (PIO-USB on GP16/17) with built-in CYW43 Bluetooth.
+    # No pin conflicts: PIO-USB uses GP16/17, CYW43 uses dedicated SPI pins (23/24/25/29).
+    # Does NOT use joypad_add_btstack() — CYW43 uses pico_btstack_* libs instead of
+    # compiled BTstack sources to avoid duplicate symbol conflicts.
+    add_executable(joypad_btusb2usb)
+    target_compile_definitions(joypad_btusb2usb PRIVATE
+        CONFIG_BTUSB2USB=1
+        CONFIG_USB=1
+        CONFIG_NO_NEOPIXEL=1
+        PICO_DEFAULT_PIO_USB_DP_PIN=16
+        BOARD_TUH_RHPORT=1
+        USE_BOOTSEL_BUTTON=1
+        CYW43_LWIP=0
+        BTSTACK_USE_CYW43=1
+        ENABLE_BTSTACK=1
+    )
+    target_sources(joypad_btusb2usb PUBLIC
+        ${COMMON_SOURCES}
+        ${USB_DEVICE_SOURCES}
+        ${BTHID_DEVICE_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbh/hid/devices/generic/hid_parser.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack/btstack_host.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack/bt_device_db.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/transport/bt_transport.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/transport/bt_transport_cyw43.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb/app.c
+    )
+    target_include_directories(joypad_btusb2usb PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2usb
+        ${CMAKE_CURRENT_SOURCE_DIR}/usb/usbd
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/btstack
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/bthid
+        ${BTSTACK_INCLUDES}
+    )
+    target_link_libraries(joypad_btusb2usb PRIVATE
+        ${COMMON_LIBRARIES}
+        tinyusb_device
+        tinyusb_pico_pio_usb
+        pico_cyw43_arch_poll
+        pico_btstack_ble
+        pico_btstack_classic
+        pico_btstack_cyw43
+    )
+    joypad_target_common(joypad_btusb2usb)
+    pico_enable_stdio_usb(joypad_btusb2usb 0)
+    pico_enable_stdio_uart(joypad_btusb2usb 1)
+
     # --- WiFi to USB (Pico W / Pico 2 W WiFi AP mode) ---
     add_executable(joypad_wifi2usb)
     target_compile_definitions(joypad_wifi2usb PRIVATE

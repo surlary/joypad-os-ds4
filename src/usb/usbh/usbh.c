@@ -83,13 +83,26 @@ void usbh_init(void)
     printf("[usbh] Enabled VBUS on GPIO %d\n", PIO_USB_VBUS_PIN);
 #endif
 
-    // Configure PIO USB to use PIO1 (PIO0 is used by NeoPixel)
+    // Configure PIO USB - use PIO0 when CYW43 is active (CYW43 SPI uses PIO1),
+    // otherwise PIO1 (PIO0 is used by NeoPixel on non-CYW43 boards)
+#ifdef BTSTACK_USE_CYW43
+    #define PIO_USB_PIO_NUM 0
+#else
+    #define PIO_USB_PIO_NUM 1
+#endif
+    // Use high DMA channel to avoid conflict with CYW43 SPI driver,
+    // which dynamically claims channels starting from 0
+    #ifdef BTSTACK_USE_CYW43
+    #define PIO_USB_DMA_CH 10
+    #else
+    #define PIO_USB_DMA_CH 0
+    #endif
     pio_usb_configuration_t pio_cfg = {
         .pin_dp = PIO_USB_DP_PIN_DEFAULT,
-        .pio_tx_num = 1,      // Use PIO1 for TX
+        .pio_tx_num = PIO_USB_PIO_NUM,
         .sm_tx = 0,
-        .tx_ch = 0,
-        .pio_rx_num = 1,      // Use PIO1 for RX
+        .tx_ch = PIO_USB_DMA_CH,
+        .pio_rx_num = PIO_USB_PIO_NUM,
         .sm_rx = 1,
         .sm_eop = 2,
         .alarm_pool = NULL,

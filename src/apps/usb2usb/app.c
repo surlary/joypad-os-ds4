@@ -26,6 +26,33 @@
 #include "bt/transport/bt_transport.h"
 #include "core/services/leds/leds.h"
 
+#ifdef BTSTACK_USE_CYW43
+#include "pico/cyw43_arch.h"
+extern const bt_transport_t bt_transport_cyw43;
+
+// CYW43 onboard LED state (Pico W has no NeoPixel)
+static uint32_t cyw43_led_last_toggle = 0;
+static bool cyw43_led_state = false;
+
+// Blink when idle, solid when connected
+static void cyw43_led_update(int devices)
+{
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (devices > 0) {
+        if (!cyw43_led_state) {
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+            cyw43_led_state = true;
+        }
+    } else {
+        if (now - cyw43_led_last_toggle >= 400) {
+            cyw43_led_state = !cyw43_led_state;
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, cyw43_led_state ? 1 : 0);
+            cyw43_led_last_toggle = now;
+        }
+    }
+}
+#endif
+
 #ifdef I2C_PEER_ENABLED
 #include "i2c_peer/i2c_peer.h"
 #endif
@@ -367,6 +394,15 @@ void app_init(void)
     oled_init();
 #endif
 
+#ifdef BTSTACK_USE_CYW43
+    // Initialize CYW43 built-in Bluetooth before USB host/device init.
+    // CYW43 SPI claims PIO1 and DMA channels 0-1 dynamically.
+    // PIO-USB uses PIO0 and a high DMA channel (10) to avoid conflicts.
+    printf("[app:usb2usb] Initializing CYW43 Bluetooth...\n");
+    bt_init(&bt_transport_cyw43);
+    router_add_route(INPUT_SOURCE_BLE_CENTRAL, OUTPUT_TARGET_USB_DEVICE, 0);
+#endif
+
     printf("[app:usb2usb] Initialization complete\n");
     printf("[app:usb2usb]   Routing: USB Host → USB Device (HID Gamepad)\n");
     printf("[app:usb2usb]   Player slots: %d\n", MAX_PLAYER_SLOTS);
@@ -392,6 +428,11 @@ void app_task(void)
         last_led_mode = mode;
     }
 
+#ifdef BTSTACK_USE_CYW43
+    // Process CYW43 Bluetooth transport
+    bt_task();
+#endif
+
     // Update LED with connected device count (USB HID + BT)
     // This makes LED go solid as soon as a controller is detected,
     // without waiting for button press to assign as player
@@ -405,6 +446,12 @@ void app_task(void)
         devices += btstack_classic_get_connection_count();
     }
     leds_set_connected_devices(devices);
+
+#ifdef BTSTACK_USE_CYW43
+    // Update CYW43 onboard LED (Pico W has no NeoPixel)
+    // Blinks when idle, solid when a controller is connected
+    cyw43_led_update(devices);
+#endif
 
     // Route feedback from USB device output to USB host input controllers
     // The output interface receives rumble/LED from the console/host
