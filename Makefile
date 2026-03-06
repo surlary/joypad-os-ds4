@@ -227,6 +227,8 @@ help:
 	@echo "  make flash-uf2-bt2usb_esp32s3 - Build + flash .uf2 via TinyUF2 drive"
 	@echo "  make bt2usb_seeed_xiao_nrf52840    - Bluetooth -> USB HID (Seeed XIAO nRF52840, requires NCS)"
 	@echo "  make flash-bt2usb_seeed_xiao_nrf52840 - Flash Seeed XIAO nRF52840 via UF2 bootloader"
+	@echo "  make bt2usb_feather_nrf52840       - Bluetooth -> USB HID (Adafruit Feather nRF52840, requires NCS)"
+	@echo "  make flash-bt2usb_feather_nrf52840 - Flash Feather nRF52840 via UF2 bootloader"
 	@echo "  make bt2nuon_pico_w     - Bluetooth -> Nuon (Pico W)"
 	@echo "  make bt2n64_pico_w      - Bluetooth -> N64 (Pico W)"
 	@echo "  make wifi2usb_pico_w    - WiFi -> USB HID (Pico W)"
@@ -537,6 +539,27 @@ flash-bt2usb_seeed_xiao_nrf52840: bt2usb_seeed_xiao_nrf52840
 
 .PHONY: monitor-bt2usb_seeed_xiao_nrf52840
 monitor-bt2usb_seeed_xiao_nrf52840:
+	@cd nrf && $(MAKE) monitor
+
+# --- Adafruit Feather nRF52840 Express bt2usb (requires nRF Connect SDK) ---
+.PHONY: bt2usb_feather_nrf52840
+bt2usb_feather_nrf52840:
+	@echo "$(YELLOW)Building bt2usb for Adafruit Feather nRF52840...$(NC)"
+	@cd nrf && $(MAKE) build BOARD=adafruit_feather_nrf52840
+	@mkdir -p $(RELEASE_DIR)
+	@cp nrf/build/nrf/zephyr/zephyr.uf2 \
+	    $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_feather_nrf52840.uf2
+	@echo "$(GREEN)✓ bt2usb_feather_nrf52840 built successfully$(NC)"
+	@echo "  File: $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_feather_nrf52840.uf2"
+	@echo ""
+
+.PHONY: flash-bt2usb_feather_nrf52840
+flash-bt2usb_feather_nrf52840: bt2usb_feather_nrf52840
+	@cd nrf && $(MAKE) flash-uf2
+	@echo ""
+
+.PHONY: monitor-bt2usb_feather_nrf52840
+monitor-bt2usb_feather_nrf52840:
 	@cd nrf && $(MAKE) monitor
 
 .PHONY: wifi2usb_pico_w

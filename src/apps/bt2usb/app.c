@@ -211,8 +211,13 @@ static void oled_init(void) {
         .pin_scl  = 0,
         .addr     = 0x3C,
     };
-    display_init_ssd1306_i2c(&cfg);
+#ifdef BOARD_FEATHER_NRF52840
+    display_init_i2c(&cfg);  // SH1107 FeatherWing OLED
+    printf("[app:bt2usb] OLED display initialized (SH1107 I2C)\n");
+#else
+    display_init_ssd1306_i2c(&cfg);  // SSD1306 XIAO Expansion Board
     printf("[app:bt2usb] OLED display initialized (SSD1306 I2C)\n");
+#endif
 }
 
 static input_event_t oled_cached_event;
@@ -306,7 +311,11 @@ void app_init(void)
     gpio_config(&led_cfg);
     gpio_set_level(STATUS_LED_GPIO, STATUS_LED_ACTIVE_LOW ? 1 : 0);  // Start OFF
 #elif defined(BTSTACK_USE_NRF)
+#ifdef BOARD_FEATHER_NRF52840
+    printf("[app:bt2usb] Adafruit Feather nRF52840 Express BLE -> USB HID\n");
+#else
     printf("[app:bt2usb] Seeed XIAO nRF52840 BLE -> USB HID\n");
+#endif
     // RGB LEDs initialized by ws2812_nrf.c via leds_init()
 #ifdef OLED_I2C_DISPLAY
     oled_init();

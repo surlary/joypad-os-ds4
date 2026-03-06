@@ -1,6 +1,6 @@
-// main.c - Seeed XIAO nRF52840 bt2usb entry point
+// main.c - nRF52840 bt2usb entry point
 //
-// Zephyr entry point for the bt2usb app on Seeed XIAO nRF52840 (xiao_ble).
+// Zephyr entry point for the bt2usb app on nRF52840 boards.
 // BTstack runs in its own Zephyr thread (created by bt_transport_nrf.c).
 // Main thread handles USB device, app logic, LED, and storage.
 
@@ -36,15 +36,20 @@ const OutputInterface* active_output = NULL;
 
 // ============================================================================
 // FAULT HANDLER — Zephyr's fault dump goes to UART console automatically.
-// We just turn on blue LED as visual indicator and halt.
+// We just turn on an LED as visual indicator and halt.
 // ============================================================================
-#define FAULT_LED_PIN 6  // Blue LED on XIAO BLE, active low
-
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 {
     (void)reason; (void)esf;
-    NRF_P0->DIRSET = (1U << FAULT_LED_PIN);
-    NRF_P0->OUTCLR = (1U << FAULT_LED_PIN);  // LED on
+#ifdef BOARD_FEATHER_NRF52840
+    // Blue LED on Feather = P1.10, active high
+    NRF_P1->DIRSET = (1U << 10);
+    NRF_P1->OUTSET = (1U << 10);  // LED on (active high)
+#else
+    // Blue LED on XIAO BLE = P0.06, active low
+    NRF_P0->DIRSET = (1U << 6);
+    NRF_P0->OUTCLR = (1U << 6);   // LED on (active low)
+#endif
     for (;;) { __WFI(); }
 }
 
@@ -146,7 +151,11 @@ static void usb_power_init(void)
 
 int main(void)
 {
+#ifdef BOARD_FEATHER_NRF52840
+    printf("[joypad] Starting bt2usb on Adafruit Feather nRF52840...\n");
+#else
     printf("[joypad] Starting bt2usb on Seeed XIAO nRF52840...\n");
+#endif
 
     // Initialize shared services
     leds_init();

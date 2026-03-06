@@ -1,0 +1,25 @@
+# Static partition layout for Adafruit Feather nRF52840 Express
+# with Adafruit UF2 bootloader (SoftDevice s140 v6 layout)
+#
+# See https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/hathach-memory-map
+sd:
+  address: 0x0
+  size: 0x26000
+  region: flash_primary
+app:
+  address: 0x26000
+  size: 0xc6000
+  region: flash_primary
+nvs_storage:
+  address: 0xec000
+  size: 0x8000
+  region: flash_primary
+adafruit_boot:
+  address: 0xf4000
+  size: 0xc000
+  region: flash_primary
+sram_primary:
+  address: 0x20000000
+  end_address: 0x20040000
+  region: sram_primary
+  size: 0x40000

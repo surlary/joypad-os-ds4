@@ -1,10 +1,11 @@
-# Makefile for Joypad bt2usb on Seeed XIAO nRF52840 (nRF Connect SDK / Zephyr)
+# Makefile for Joypad bt2usb on nRF52840 boards (nRF Connect SDK / Zephyr)
 #
+# Supported boards: xiao_ble, adafruit_feather_nrf52840
 # Requires: nRF Connect SDK v3.1.0 (installed via 'make init')
 # Usage:
 #   make init              # One-time workspace setup
 #   make build             # Build for default board (xiao_ble)
-#   make build BOARD=...   # Build for specific board
+#   make build BOARD=adafruit_feather_nrf52840  # Build for Feather
 #   make flash-uf2         # Flash via UF2 bootloader drive
 #   make clean             # Remove build directory
 
@@ -40,7 +41,7 @@ init:
 
 # Build the project
 build:
-	@echo "Building bt2usb for Seeed XIAO nRF52840 ($(BOARD))"
+	@echo "Building bt2usb for nRF52840 (board=$(BOARD))"
 	$(BUILD_ARGS)
 
 # Flash via UF2 bootloader (double-tap reset to enter bootloader)

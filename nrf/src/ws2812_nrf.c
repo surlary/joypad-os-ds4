@@ -1,8 +1,10 @@
-// ws2812_nrf.c - RGB LED driver for Seeed XIAO nRF52840
+// ws2812_nrf.c - RGB LED driver for nRF52840 boards
 //
-// Uses the three discrete LEDs (red P0.26, green P0.30, blue P0.06)
-// as an RGB indicator. All active low. Maps NeoPixel API to GPIO on/off
-// with color thresholding and blink-based pulsing.
+// Maps NeoPixel API to discrete GPIO LEDs with color thresholding
+// and blink-based pulsing.
+//
+// XIAO nRF52840:   3 LEDs (R=P0.26, G=P0.30, B=P0.06) on gpio0, active LOW
+// Feather nRF52840: 2 LEDs (R=P1.15, B=P1.10) on gpio1, active HIGH
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -11,12 +13,20 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 
-// LED pins on XIAO nRF52840 (active low)
+#ifdef BOARD_FEATHER_NRF52840
+// Feather nRF52840 Express: Red=P1.15, Blue=P1.10, active HIGH, no green
+#define LED_RED_PIN   15  // P1.15
+#define LED_BLUE_PIN  10  // P1.10
+#define LED_PORT_LABEL DT_NODELABEL(gpio1)
+#define LED_ACTIVE_HIGH 1
+#else
+// Seeed XIAO nRF52840: R=P0.26, G=P0.30, B=P0.06, active LOW
 #define LED_RED_PIN   26  // P0.26
 #define LED_GREEN_PIN 30  // P0.30
 #define LED_BLUE_PIN   6  // P0.06
-
 #define LED_PORT_LABEL DT_NODELABEL(gpio0)
+#define LED_ACTIVE_HIGH 0
+#endif
 
 static const struct device *led_port;
 
@@ -47,13 +57,18 @@ static uint32_t state_change_ms = 0;
 // GPIO HELPERS
 // ============================================================================
 
-// Set all three LEDs at once. Active low: pin LOW = on, pin HIGH = off.
+// Set LEDs at once. Polarity handled by LED_ACTIVE_HIGH.
 static void set_rgb(bool r, bool g, bool b)
 {
     if (!led_port) return;
+#if LED_ACTIVE_HIGH
+    gpio_pin_set(led_port, LED_RED_PIN, r ? 1 : 0);
+    gpio_pin_set(led_port, LED_BLUE_PIN, b ? 1 : 0);
+#else
     gpio_pin_set(led_port, LED_RED_PIN, r ? 0 : 1);
     gpio_pin_set(led_port, LED_GREEN_PIN, g ? 0 : 1);
     gpio_pin_set(led_port, LED_BLUE_PIN, b ? 0 : 1);
+#endif
 }
 
 // Threshold RGB values to on/off per channel
@@ -80,13 +95,20 @@ void neopixel_init(void)
         return;
     }
 
-    // GPIO_OUTPUT_HIGH = start with pin HIGH = LED off (active low)
+#if LED_ACTIVE_HIGH
+    // Active high: start LOW = LED off
+    gpio_pin_configure(led_port, LED_RED_PIN, GPIO_OUTPUT_LOW);
+    gpio_pin_configure(led_port, LED_BLUE_PIN, GPIO_OUTPUT_LOW);
+    printf("[led_nrf] LEDs initialized (R=P1.%d B=P1.%d, active high)\n",
+           LED_RED_PIN, LED_BLUE_PIN);
+#else
+    // Active low: start HIGH = LED off
     gpio_pin_configure(led_port, LED_RED_PIN, GPIO_OUTPUT_HIGH);
     gpio_pin_configure(led_port, LED_GREEN_PIN, GPIO_OUTPUT_HIGH);
     gpio_pin_configure(led_port, LED_BLUE_PIN, GPIO_OUTPUT_HIGH);
-
-    printf("[led_nrf] RGB LEDs initialized (R=P0.%d G=P0.%d B=P0.%d)\n",
+    printf("[led_nrf] RGB LEDs initialized (R=P0.%d G=P0.%d B=P0.%d, active low)\n",
            LED_RED_PIN, LED_GREEN_PIN, LED_BLUE_PIN);
+#endif
 }
 
 void neopixel_set_override_color(uint8_t r, uint8_t g, uint8_t b)

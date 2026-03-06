@@ -75,6 +75,12 @@ void display_progress_bar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t pe
 // Check if display is initialized
 bool display_is_initialized(void);
 
+// Async display mode: display_update() marks dirty and returns immediately.
+// A platform thread calls display_flush() to do the actual I2C/SPI transfer.
+void display_set_async(bool async);
+void display_flush(void);
+bool display_is_dirty(void);
+
 // Invert display colors
 void display_invert(bool invert);
 

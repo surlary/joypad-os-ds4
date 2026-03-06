@@ -1,5 +1,6 @@
-# Zephyr app CMakeLists for Joypad bt2usb on Seeed XIAO nRF52840 (xiao_ble)
+# Zephyr app CMakeLists for Joypad bt2usb on nRF52840 boards
 #
+# Supported boards: xiao_ble (Seeed XIAO), adafruit_feather_nrf52840
 # Compiles shared sources from ../src/ alongside nRF-specific code.
 # BTstack from pico-sdk submodule (Zephyr HCI transport), TinyUSB device-only (nRF5x DCD).
 
@@ -223,11 +224,20 @@ endif()
 
 string(TIMESTAMP BUILD_TIME "%Y-%m-%d %H:%M:%S")
 
+# Board-specific compile definitions
+if(BOARD MATCHES "adafruit_feather_nrf52840")
+    set(BOARD_DEFINE "BOARD_FEATHER_NRF52840=1")
+    set(BOARD_NAME_STR "adafruit_feather_nrf52840")
+else()
+    set(BOARD_NAME_STR "xiao_ble")
+endif()
+
 target_compile_definitions(app PRIVATE
     JOYPAD_VERSION="${JOYPAD_VERSION}"
     GIT_COMMIT="${GIT_COMMIT}"
     BUILD_TIME="${BUILD_TIME}"
-    BOARD_NAME="xiao_ble"
+    BOARD_NAME="${BOARD_NAME_STR}"
+    ${BOARD_DEFINE}
 )
 
 # Disable -Werror for cross-compiled shared code

@@ -154,6 +154,8 @@ static const uint8_t font_6x8[] = {
 static bool initialized = false;
 static uint8_t col_offset = 2;  // SH1106 default
 static bool rotated_panel = false;  // SH1107: 64x128 native panel rotated 90° to 128x64
+static bool async_mode = false;
+static volatile bool dirty = false;
 
 // Transport function pointers (set by display_spi_init or display_i2c_init)
 static void (*transport_write_cmd)(uint8_t) = NULL;
@@ -325,8 +327,9 @@ void display_clear(void) {
     memset(framebuffer, 0, sizeof(framebuffer));
 }
 
-void display_update(void) {
+void display_flush(void) {
     if (!initialized) return;
+    dirty = false;
 
     if (rotated_panel) {
         // SH1107: native 64x128 panel rotated 90° to landscape 128x64.
@@ -363,6 +366,23 @@ void display_update(void) {
             write_data(framebuffer[page], DISPLAY_WIDTH);
         }
     }
+}
+
+void display_update(void) {
+    if (!initialized) return;
+    if (async_mode) {
+        dirty = true;
+        return;
+    }
+    display_flush();
+}
+
+void display_set_async(bool async) {
+    async_mode = async;
+}
+
+bool display_is_dirty(void) {
+    return dirty;
 }
 
 void display_invert(bool invert) {
