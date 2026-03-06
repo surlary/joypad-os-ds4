@@ -46,7 +46,7 @@ make gc2usb_kb2040     # GameCube → USB HID
 make n642dc_kb2040     # N64 → Dreamcast
 make bt2usb_pico_w     # BT-only → USB HID (Pico W)
 make bt2usb_esp32s3    # BLE-only → USB HID (ESP32-S3, requires ESP-IDF)
-make bt2usb_xiao_ble   # BLE-only → USB HID (Seeed XIAO nRF52840, requires NCS)
+make bt2usb_seeed_xiao_nrf52840   # BLE-only → USB HID (Seeed XIAO nRF52840, requires NCS)
 make wifi2usb_pico_w   # WiFi → USB HID (Pico W)
 
 # Build all (RP2040 targets only)
@@ -363,9 +363,9 @@ The `bt2usb` app also runs on Seeed XIAO nRF52840 (xiao_ble), using BLE (no Clas
 ```bash
 # Prerequisites: nRF Connect SDK v3.1.0+ (installed via make init-nrf)
 make init-nrf                # One-time NCS workspace setup
-make bt2usb_xiao_ble         # Build
-make flash-bt2usb_xiao_ble   # Flash via UF2 bootloader
-make monitor-bt2usb_xiao_ble # UART serial monitor
+make bt2usb_seeed_xiao_nrf52840         # Build
+make flash-bt2usb_seeed_xiao_nrf52840   # Flash via UF2 bootloader
+make monitor-bt2usb_seeed_xiao_nrf52840 # UART serial monitor
 ```
 
 Key differences from RP2040:
