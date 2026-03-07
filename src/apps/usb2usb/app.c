@@ -69,9 +69,11 @@ static void cyw43_led_update(int devices)
 #include <stdio.h>
 #include <string.h>
 
-#ifdef OLED_I2C_INST
+#if defined(OLED_I2C_INST) || defined(OLED_I2C_DISPLAY)
 #include "core/services/display/display.h"
+#ifdef OLED_I2C_INST
 #include "hardware/gpio.h"
+#endif
 
 // Arrow characters for display (1=up, 2=down, 3=left, 4=right)
 #define ARROW_UP    "\x01"
@@ -105,7 +107,7 @@ static const button_name_t button_names[] = {
     { JP_BUTTON_A2, "A2" },
     { 0, NULL }
 };
-#endif
+#endif // OLED_I2C_INST || OLED_I2C_DISPLAY
 
 // ============================================================================
 // BUTTON EVENT HANDLER
@@ -201,7 +203,7 @@ const OutputInterface** app_get_output_interfaces(uint8_t* count)
 // OLED DISPLAY
 // ============================================================================
 
-#ifdef OLED_I2C_INST
+#if defined(OLED_I2C_INST) || defined(OLED_I2C_DISPLAY)
 
 static const char* transport_str(input_transport_t t) {
     switch (t) {
@@ -214,6 +216,7 @@ static const char* transport_str(input_transport_t t) {
     }
 }
 
+#ifdef OLED_I2C_INST
 static void oled_init(void) {
     display_i2c_config_t cfg = {
         .i2c_inst = OLED_I2C_INST,
@@ -240,7 +243,7 @@ static void oled_init(void) {
 static void oled_handle_buttons(void) {
     static bool last_b = true, last_c = true;  // Active-low (pull-up)
     static uint32_t debounce_b = 0, debounce_c = 0;
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
 
     bool b = gpio_get(OLED_BUTTON_B_PIN);
     bool c = gpio_get(OLED_BUTTON_C_PIN);
@@ -268,6 +271,18 @@ static void oled_handle_buttons(void) {
     }
     last_c = c;
 }
+#elif defined(OLED_I2C_DISPLAY)
+static void oled_init(void) {
+    display_i2c_config_t cfg = {
+        .i2c_inst = 0,
+        .pin_sda  = 0,     // Configured by devicetree on nRF
+        .pin_scl  = 0,
+        .addr     = 0x3C,
+    };
+    display_init_i2c(&cfg);  // SH1107 FeatherWing OLED
+    printf("[app:usb2usb] OLED display initialized (SH1107 I2C)\n");
+}
+#endif
 
 static input_event_t oled_cached_event;
 static bool oled_has_event = false;
@@ -275,7 +290,7 @@ static bool oled_has_event = false;
 static void oled_update_display(void) {
     static uint32_t last_update = 0;
     static uint32_t last_buttons = 0;
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
 
     // Cache latest router output (don't gate on display throttle — always consume)
     if (playersCount > 0 && players[0].dev_addr >= 0) {
@@ -344,7 +359,7 @@ static void oled_update_display(void) {
     display_update();
 }
 
-#endif // OLED_I2C_INST
+#endif // OLED_I2C_INST || OLED_I2C_DISPLAY
 
 // ============================================================================
 // APP INITIALIZATION
@@ -404,7 +419,7 @@ void app_init(void)
     // Set boot LED color (visible during potentially blocking USB host init)
     leds_set_color(80, 80, 80);
 
-#ifdef OLED_I2C_INST
+#if defined(OLED_I2C_INST) || defined(OLED_I2C_DISPLAY)
     oled_init();
 #endif
 
@@ -492,6 +507,8 @@ void app_task(void)
 
 #ifdef OLED_I2C_INST
     oled_handle_buttons();
+#endif
+#if defined(OLED_I2C_INST) || defined(OLED_I2C_DISPLAY)
     oled_update_display();
 #endif
 
