@@ -1,7 +1,7 @@
 // xinput.c - X-input protocol handler (TinyUSB X-input host callbacks)
 #include "tusb.h"
 #include "host/usbh_pvt.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include "core/buttons.h"
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
@@ -204,7 +204,7 @@ void xinput_task(void)
   // Process Xbox One auth passthrough
   xbone_auth_task();
 
-  uint32_t now = to_ms_since_boot(get_absolute_time());
+  uint32_t now = platform_time_ms();
 
   // Chatpad keepalive for all xinput devices (runs even without player assignment)
   // TODO: chatpad keepalive disabled until chatpad support is working

@@ -19,11 +19,15 @@
 #include "core/services/button/button.h"
 #include "core/input_interface.h"
 #include "core/output_interface.h"
+#ifndef DISABLE_USB_HOST
 #include "usb/usbh/usbh.h"
+#endif
 #include "usb/usbd/usbd.h"
 
+#ifdef ENABLE_BTSTACK
 #include "bt/btstack/btstack_host.h"
 #include "bt/transport/bt_transport.h"
+#endif
 #include "core/services/leds/leds.h"
 
 #ifdef BTSTACK_USE_CYW43
@@ -58,7 +62,10 @@ static void cyw43_led_update(int devices)
 #endif
 #include "core/buttons.h"
 #include "tusb.h"
+#ifndef PLATFORM_NRF
 #include "pico/stdlib.h"
+#endif
+#include "platform/platform.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -108,10 +115,13 @@ static void on_button_event(button_event_t event)
 {
     switch (event) {
         case BUTTON_EVENT_CLICK:
+#ifdef ENABLE_BTSTACK
             if (bt_is_ready()) {
                 printf("[app:usb2usb] Starting BT scan (60s)...\n");
                 btstack_host_start_timed_scan(60000);
-            } else {
+            } else
+#endif
+            {
                 printf("[app:usb2usb] current mode: %s\n",
                        usbd_get_mode_name(usbd_get_mode()));
             }
@@ -121,7 +131,7 @@ static void on_button_event(button_event_t event)
             // Double-click to cycle USB output mode
             printf("[app:usb2usb] Double-click - switching USB output mode...\n");
             tud_task();
-            sleep_ms(50);
+            platform_sleep_ms(50);
             tud_task();
 
             usb_output_mode_t next = usbd_get_next_mode();
@@ -139,12 +149,14 @@ static void on_button_event(button_event_t event)
             break;
 
         case BUTTON_EVENT_HOLD:
+#ifdef ENABLE_BTSTACK
             // Long press to disconnect all devices and clear all bonds
             if (bt_is_ready()) {
                 printf("[app:usb2usb] Disconnecting all devices and clearing bonds...\n");
                 btstack_host_disconnect_all_devices();
             }
             btstack_host_delete_all_bonds();
+#endif
             break;
 
         default:
@@ -157,7 +169,9 @@ static void on_button_event(button_event_t event)
 // ============================================================================
 
 static const InputInterface* input_interfaces[] = {
+#ifndef DISABLE_USB_HOST
     &usbh_input_interface,
+#endif
 #ifdef I2C_PEER_ENABLED
     &i2c_peer_input_interface,
 #endif
@@ -236,7 +250,7 @@ static void oled_handle_buttons(void) {
         debounce_b = now;
         printf("[app:usb2usb] OLED Button B - switching USB output mode...\n");
         tud_task();
-        sleep_ms(50);
+        platform_sleep_ms(50);
         tud_task();
         usb_output_mode_t next = usbd_get_next_mode();
         printf("[app:usb2usb] Switching to %s\n", usbd_get_mode_name(next));
@@ -437,14 +451,18 @@ void app_task(void)
     // This makes LED go solid as soon as a controller is detected,
     // without waiting for button press to assign as player
     int devices = 0;
+#ifndef DISABLE_USB_HOST
     for (uint8_t addr = 1; addr < MAX_DEVICES; addr++) {
         if (tuh_mounted(addr) && tuh_hid_instance_count(addr) > 0) {
             devices++;
         }
     }
+#endif
+#ifdef ENABLE_BTSTACK
     if (bt_is_ready()) {
         devices += btstack_classic_get_connection_count();
     }
+#endif
     leds_set_connected_devices(devices);
 
 #ifdef BTSTACK_USE_CYW43

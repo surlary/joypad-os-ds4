@@ -7,7 +7,7 @@
 #include "core/services/players/manager.h"
 #include "core/services/players/feedback.h"
 #include "usb/usbh/hid/hid_utils.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include "app_config.h"
 #include <stdlib.h>
 
@@ -164,7 +164,7 @@ void task_sinput_host(uint8_t dev_addr, uint8_t instance, device_output_config_t
   const uint32_t interval_ms = 20;
   static uint32_t start_ms = 0;
 
-  uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
+  uint32_t current_time_ms = platform_time_ms();
   if (current_time_ms - start_ms < interval_ms) return;
   start_ms = current_time_ms;
 

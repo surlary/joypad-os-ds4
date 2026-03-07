@@ -67,6 +67,19 @@ void platform_reboot(void)
     sys_reboot(SYS_REBOOT_COLD);
 }
 
+// ============================================================================
+// TINYUSB PLATFORM (USB host stack requires these)
+// ============================================================================
+
+#ifdef CONFIG_MAX3421
+#include "tusb.h"
+
+uint32_t tusb_time_millis_api(void)
+{
+    return k_uptime_get_32();
+}
+#endif
+
 void platform_reboot_bootloader(void)
 {
     // Adafruit nRF52 UF2 bootloader checks GPREGRET for magic value 0x57

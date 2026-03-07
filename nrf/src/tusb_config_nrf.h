@@ -1,7 +1,7 @@
-// tusb_config_nrf.h - TinyUSB configuration for Seeed XIAO nRF52840
+// tusb_config_nrf.h - TinyUSB configuration for nRF52840 boards
 //
-// Device-only configuration for bt2usb on Seeed XIAO nRF52840.
-// No USB host (BT input only), same HID/CDC config as ESP32.
+// Device configuration for nRF52840 boards.
+// When CONFIG_MAX3421 is defined, adds USB host via MAX3421E FeatherWing.
 
 #ifndef _TUSB_CONFIG_H_
 #define _TUSB_CONFIG_H_
@@ -28,8 +28,27 @@
 // USB DEVICE CONFIGURATION
 //--------------------------------------------------------------------
 
-// Device-only mode (no USB host on nRF52840 bt2usb)
+// RHPORT0 = native nRF52840 USB (always device)
 #define CFG_TUSB_RHPORT0_MODE       OPT_MODE_DEVICE
+
+//--------------------------------------------------------------------
+// USB HOST CONFIGURATION (MAX3421E FeatherWing on SPI)
+//--------------------------------------------------------------------
+
+#ifdef CONFIG_MAX3421
+#define CFG_TUSB_RHPORT1_MODE       OPT_MODE_HOST
+#define CFG_TUH_MAX3421             1
+
+#define CFG_TUH_ENUMERATION_BUFSIZE 1280
+#define CFG_TUH_HUB                 1
+#define CFG_TUH_HID                 8
+#define CFG_TUH_XINPUT              4
+#define CFG_TUH_DEVICE_MAX          (4*CFG_TUH_HUB + 1)
+#define CFG_TUH_API_EDPT_XFER       1
+
+#define CFG_TUH_HID_EPIN_BUFSIZE    64
+#define CFG_TUH_HID_EPOUT_BUFSIZE   64
+#endif // CONFIG_MAX3421
 
 #define CFG_TUD_ENDPOINT0_SIZE      64
 

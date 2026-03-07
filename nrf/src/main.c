@@ -1,7 +1,8 @@
-// main.c - nRF52840 bt2usb entry point
+// main.c - nRF52840 entry point
 //
-// Zephyr entry point for the bt2usb app on nRF52840 boards.
-// BTstack runs in its own Zephyr thread (created by bt_transport_nrf.c).
+// Zephyr entry point for bt2usb/usb2usb apps on nRF52840 boards.
+// bt2usb: BTstack runs in its own Zephyr thread (created by bt_transport_nrf.c).
+// usb2usb: USB host via MAX3421E SPI, no Bluetooth.
 // Main thread handles USB device, app logic, LED, and storage.
 
 #include <stdio.h>
@@ -151,7 +152,9 @@ static void usb_power_init(void)
 
 int main(void)
 {
-#ifdef BOARD_FEATHER_NRF52840
+#if defined(CONFIG_USB2USB)
+    printf("[joypad] Starting usb2usb on Adafruit Feather nRF52840...\n");
+#elif defined(BOARD_FEATHER_NRF52840)
     printf("[joypad] Starting bt2usb on Adafruit Feather nRF52840...\n");
 #else
     printf("[joypad] Starting bt2usb on Seeed XIAO nRF52840...\n");
@@ -162,6 +165,16 @@ int main(void)
     storage_init();
     players_init();
     app_init();
+
+#ifdef CONFIG_MAX3421
+    // Initialize MAX3421E SPI host (must be before tusb_init/input init)
+    {
+        extern bool max3421_host_init(void);
+        if (!max3421_host_init()) {
+            printf("[joypad] MAX3421E not detected - USB host disabled\n");
+        }
+    }
+#endif
 
     // Get and initialize input interfaces
     inputs = app_get_input_interfaces(&input_count);
@@ -189,12 +202,39 @@ int main(void)
     // Trigger USB enumeration (handles VBUS already present at boot)
     usb_power_init();
 
+#ifdef CONFIG_MAX3421
+    // Enable MAX3421E interrupt now that TinyUSB host is initialized
+    {
+        extern void max3421_host_enable_int(void);
+        max3421_host_enable_int();
+    }
+#endif
+
     printf("[joypad] Entering main loop\n");
+
+#ifdef CONFIG_MAX3421
+    uint32_t diag_time = 0;
+#endif
 
     // Main loop
     while (1) {
-        // Poll TinyUSB (non-blocking)
+        // Poll TinyUSB device (non-blocking)
         tud_task_ext(0, false);
+
+#ifdef CONFIG_MAX3421
+        // Process TinyUSB host events (MAX3421E ISR handles SPI directly)
+        tuh_task_ext(0, false);
+
+        // Periodic diagnostic (every 5s for first 60s)
+        {
+            extern void max3421_print_diag(void);
+            uint32_t now = platform_time_ms();
+            if (diag_time == 0 || (now - diag_time >= 5000 && now < 60000)) {
+                max3421_print_diag();
+                diag_time = now;
+            }
+        }
+#endif
 
         leds_task();
         players_task();

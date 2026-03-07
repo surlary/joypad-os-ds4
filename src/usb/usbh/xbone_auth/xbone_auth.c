@@ -5,7 +5,7 @@
 #include "xbone_auth.h"
 #include "usb/usbd/drivers/xgip_protocol.h"
 #include "usb/usbd/drivers/tud_xbone.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include "tusb.h"
 #include <string.h>
 #include <stdio.h>
@@ -156,7 +156,7 @@ void xbone_auth_task(void)
     }
 
     // Process report queue - send to controller
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
     if (queue_count > 0 && (now - last_report_queue_sent) > REPORT_QUEUE_INTERVAL) {
         uint8_t report[64];
         uint16_t len = report_queue[queue_head].len;
@@ -169,7 +169,7 @@ void xbone_auth_task(void)
             last_report_queue_sent = now;
         } else {
             printf("[xbone_auth] Failed to send report to controller\n");
-            busy_wait_ms(REPORT_QUEUE_INTERVAL);
+            platform_sleep_ms(REPORT_QUEUE_INTERVAL);
         }
     }
 }
@@ -223,7 +223,7 @@ void xbone_auth_report_received(uint8_t dev_addr, uint8_t instance,
     if (!xgip_validate(&incoming_xgip)) {
         printf("[xbone_auth] Invalid packet, resetting\n");
         // First packet may be invalid, wait for dongle boot
-        busy_wait_ms(50);
+        platform_sleep_ms(50);
         xgip_reset(&incoming_xgip);
         return;
     }

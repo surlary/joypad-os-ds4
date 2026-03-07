@@ -4,7 +4,7 @@
 #include "core/services/players/manager.h"
 #include "core/router/router.h"
 #include "core/input_event.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 
 // Stick calibration data
 typedef struct {
@@ -492,7 +492,7 @@ void output_switch_pro(uint8_t dev_addr, uint8_t instance, device_output_config_
       switch_devices[dev_addr].instances[instance].usb_enable =
         tuh_hid_send_report(dev_addr, instance, 0, disable_timeout_cmd, sizeof(disable_timeout_cmd));
 
-      sleep_ms(100);
+      platform_sleep_ms(100);
       tuh_hid_receive_report(dev_addr, instance);
 
     // wait for usb enabled acknowledgment
@@ -523,7 +523,7 @@ void output_switch_pro(uint8_t dev_addr, uint8_t instance, device_output_config_
 
         switch_devices[dev_addr].instances[instance].home_led_set = true;
         tuh_hid_send_report(dev_addr, instance, 0, report, report_size);
-        sleep_ms(100);
+        platform_sleep_ms(100);
 
       } else if (!switch_devices[dev_addr].instances[instance].full_report_enabled) {
         TU_LOG1("SWITCH[%d|%d]: CMD_AND_RUMBLE, CMD_MODE, FULL_REPORT_MODE \r\n", dev_addr, instance);
@@ -537,7 +537,7 @@ void output_switch_pro(uint8_t dev_addr, uint8_t instance, device_output_config_
 
         switch_devices[dev_addr].instances[instance].full_report_enabled = true;
         tuh_hid_send_report(dev_addr, instance, 0, report, report_size);
-        sleep_ms(100);
+        platform_sleep_ms(100);
 
       // } else if (!switch_devices[dev_addr].instances[instance].imu_enabled) {
       //   TU_LOG1("SWITCH[%d|%d]: CMD_AND_RUMBLE, CMD_GYRO, 1 \r\n", dev_addr, instance);
@@ -550,7 +550,7 @@ void output_switch_pro(uint8_t dev_addr, uint8_t instance, device_output_config_
 
       //   switch_devices[dev_addr].instances[instance].imu_enabled = true;
       //   tuh_hid_send_report(dev_addr, instance, 0, report, report_size);
-      //   sleep_ms(100);
+      //   platform_sleep_ms(100);
 
       // } else if (switch_devices[dev_addr].instances[instance].imu_enabled) {
       } else if (switch_devices[dev_addr].instances[instance].full_report_enabled) {
@@ -625,7 +625,7 @@ void task_switch_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t*
   const uint32_t interval_ms = 20;
   static uint32_t start_ms = 0;
 
-  uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
+  uint32_t current_time_ms = platform_time_ms();
   if (current_time_ms - start_ms >= interval_ms)
   {
     start_ms = current_time_ms;

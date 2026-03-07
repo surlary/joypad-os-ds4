@@ -8,7 +8,7 @@
 #include "core/services/players/manager.h"
 #include "core/router/router.h"
 #include "core/input_event.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 #include "host/usbh.h"
 #include "host/usbh_pvt.h"
 
@@ -465,7 +465,7 @@ void input_switch2_pro(uint8_t dev_addr, uint8_t instance, uint8_t const* report
 
 static void output_rumble(uint8_t dev_addr, uint8_t instance, uint8_t rumble_left, uint8_t rumble_right) {
   switch2_instance_t* inst = &switch2_devices[dev_addr].instances[instance];
-  uint32_t now = to_ms_since_boot(get_absolute_time());
+  uint32_t now = platform_time_ms();
 
   // Check if we need to send:
   // - Always send on change
@@ -634,7 +634,7 @@ void task_switch2_pro(uint8_t dev_addr, uint8_t instance, device_output_config_t
 
   // Deferred bulk endpoint init (avoids crash on PIO USB if done too early)
   if (inst->state == SWITCH2_STATE_FIND_ENDPOINT) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t now = platform_time_ms();
     // Wait 100ms after mount before accessing config descriptor
     if (now - inst->init_delay_ms < 100) {
       return;
@@ -756,7 +756,7 @@ static bool init_switch2_pro(uint8_t dev_addr, uint8_t instance) {
   // Defer bulk endpoint init - do it in task() after device is fully ready
   // This avoids crashes on PIO USB when accessing config descriptor too early
   inst->state = SWITCH2_STATE_FIND_ENDPOINT;
-  inst->init_delay_ms = to_ms_since_boot(get_absolute_time());
+  inst->init_delay_ms = platform_time_ms();
 
   return true;
 }

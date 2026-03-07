@@ -4,7 +4,7 @@
 #include "core/services/players/manager.h"
 #include "core/router/router.h"
 #include "core/input_event.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 
 // check if device is GameCube Adapter for WiiU/Switch
 static inline bool is_gamecube_adapter(uint16_t vid, uint16_t pid) {
@@ -146,7 +146,7 @@ void task_gamecube_adapter(uint8_t dev_addr, uint8_t instance, device_output_con
   const uint32_t interval_ms = 20;
   static uint32_t start_ms = 0;
 
-  uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
+  uint32_t current_time_ms = platform_time_ms();
   if (current_time_ms - start_ms >= interval_ms) {
     start_ms = current_time_ms;
     output_gamecube_adapter(dev_addr, instance, config);

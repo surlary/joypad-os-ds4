@@ -4,7 +4,7 @@
 #include "core/services/players/manager.h"
 #include "core/router/router.h"
 #include "core/input_event.h"
-#include "pico/time.h"
+#include "platform/platform.h"
 
 // TODO: Get these from BTstack when BT dongle is connected
 static const uint8_t* btd_get_local_bd_addr(void) {
@@ -451,10 +451,10 @@ static bool ds3_set_report_raw(uint8_t dev_addr, uint8_t instance, uint8_t repor
   }
 
   // Wait for completion with timeout
-  uint32_t start = to_ms_since_boot(get_absolute_time());
+  uint32_t start = platform_time_ms();
   while (!ds3_xfer_complete) {
     tuh_task();  // Process USB events
-    if (to_ms_since_boot(get_absolute_time()) - start > 1000) {
+    if (platform_time_ms() - start > 1000) {
       printf("[DS3] Control transfer timeout!\n");
       return false;
     }
@@ -587,7 +587,7 @@ void task_sony_ds3(uint8_t dev_addr, uint8_t instance, device_output_config_t* c
   const uint32_t interval_ms = 20;
   static uint32_t start_ms = 0;
 
-  uint32_t current_time_ms = to_ms_since_boot(get_absolute_time());
+  uint32_t current_time_ms = platform_time_ms();
   if (current_time_ms - start_ms >= interval_ms) {
     start_ms = current_time_ms;
     output_sony_ds3(dev_addr, instance, config);

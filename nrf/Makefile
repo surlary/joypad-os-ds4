@@ -1,31 +1,48 @@
-# Makefile for Joypad bt2usb on nRF52840 boards (nRF Connect SDK / Zephyr)
+# Makefile for Joypad on nRF52840 boards (nRF Connect SDK / Zephyr)
 #
 # Supported boards: xiao_ble, adafruit_feather_nrf52840
+# Supported apps:   bt2usb (default), usb2usb (with MAX3421E FeatherWing)
 # Requires: nRF Connect SDK v3.1.0 (installed via 'make init')
 # Usage:
 #   make init              # One-time workspace setup
 #   make build             # Build for default board (xiao_ble)
 #   make build BOARD=adafruit_feather_nrf52840  # Build for Feather
+#   make build APP_TYPE=usb2usb BOARD=adafruit_feather_nrf52840  # usb2usb
 #   make flash-uf2         # Flash via UF2 bootloader drive
 #   make clean             # Remove build directory
 
 .PHONY: init build flash-uf2 flash-jlink monitor clean fullclean help
 
 BOARD ?= xiao_ble
+APP_TYPE ?= bt2usb
 
 # Build with board-specific overlay and conf if they exist
 OVERLAY := $(wildcard $(shell pwd)/boards/$(BOARD).overlay)
 CONF := $(wildcard $(shell pwd)/boards/$(BOARD).conf)
 
-BUILD_ARGS := west build -b $(BOARD) . --pristine=always
-ifneq ($(OVERLAY)$(CONF),)
-    BUILD_ARGS += --
-endif
+# App-specific extra conf (e.g., prj_usb2usb.conf)
+APP_CONF := $(wildcard $(shell pwd)/prj_$(APP_TYPE).conf)
+
+BUILD_ARGS := west build -b $(BOARD) . --pristine=always --
+BUILD_ARGS += -DAPP_TYPE=$(APP_TYPE)
 ifneq ($(OVERLAY),)
     BUILD_ARGS += -DDTC_OVERLAY_FILE="$(OVERLAY)"
 endif
+
+# Combine board conf and app conf into EXTRA_CONF_FILE (semicolon-separated for CMake)
+EXTRA_CONFS :=
 ifneq ($(CONF),)
-    BUILD_ARGS += -DEXTRA_CONF_FILE="$(CONF)"
+    EXTRA_CONFS := $(CONF)
+endif
+ifneq ($(APP_CONF),)
+    ifneq ($(EXTRA_CONFS),)
+        EXTRA_CONFS := $(EXTRA_CONFS);$(APP_CONF)
+    else
+        EXTRA_CONFS := $(APP_CONF)
+    endif
+endif
+ifneq ($(EXTRA_CONFS),)
+    BUILD_ARGS += -DEXTRA_CONF_FILE="$(EXTRA_CONFS)"
 endif
 
 # Initialize nRF Connect SDK workspace (one-time setup)
@@ -41,7 +58,7 @@ init:
 
 # Build the project
 build:
-	@echo "Building bt2usb for nRF52840 (board=$(BOARD))"
+	@echo "Building $(APP_TYPE) for nRF52840 (board=$(BOARD))"
 	$(BUILD_ARGS)
 
 # Flash via UF2 bootloader (double-tap reset to enter bootloader)
@@ -97,3 +114,7 @@ help:
 	@echo "  monitor      - Monitor USB CDC serial output"
 	@echo "  clean        - Remove build directory"
 	@echo "  fullclean    - Remove entire workspace (requires re-init)"
+	@echo ""
+	@echo "Variables:"
+	@echo "  BOARD        - Target board (default: xiao_ble)"
+	@echo "  APP_TYPE     - App to build: bt2usb (default) or usb2usb"
