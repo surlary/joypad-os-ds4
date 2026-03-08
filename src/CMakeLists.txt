@@ -458,7 +458,7 @@ target_compile_definitions(joypad_n64 PRIVATE CONFIG_N64=1)
 target_sources(joypad_n64 PUBLIC ${COMMON_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/native/device/n64/n64_device.c
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/joybus.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/N64Console.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/N64Console.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2n64/app.c
 )
 target_include_directories(joypad_n64 PUBLIC
@@ -603,6 +603,33 @@ joypad_target_common(joypad_n642dc)
 # No BTstack for n642dc - uses native N64 input, not USB host
 pico_generate_pio_header(joypad_n642dc ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
 pico_generate_pio_header(joypad_n642dc ${CMAKE_CURRENT_LIST_DIR}/native/device/dreamcast/maple.pio)
+
+# --- N64 to Dreamcast (Pico 2 W) ---
+add_executable(joypad_n642dc_pico2_w)
+target_compile_definitions(joypad_n642dc_pico2_w PRIVATE
+    CONFIG_N642DC=1
+    CONFIG_DC=1
+    CONFIG_NO_NEOPIXEL=1
+    USE_BOOTSEL_BUTTON=1
+    N64_PIN_DATA=4
+)
+target_sources(joypad_n642dc_pico2_w PUBLIC ${COMMON_SOURCES}
+    ${N64_HOST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast/dreamcast_device.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast/maple_state_machine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642dc/app.c
+)
+target_include_directories(joypad_n642dc_pico2_w PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/n642dc
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/host/n64
+    ${CMAKE_CURRENT_SOURCE_DIR}/native/device/dreamcast
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/include
+)
+target_link_libraries(joypad_n642dc_pico2_w PRIVATE ${COMMON_LIBRARIES} hardware_dma)
+joypad_target_common(joypad_n642dc_pico2_w)
+# No BTstack for n642dc - uses native N64 input, not USB host
+pico_generate_pio_header(joypad_n642dc_pico2_w ${CMAKE_CURRENT_LIST_DIR}/lib/joybus-pio/src/joybus.pio)
+pico_generate_pio_header(joypad_n642dc_pico2_w ${CMAKE_CURRENT_LIST_DIR}/native/device/dreamcast/maple.pio)
 
 # --- N64 to Nuon ---
 add_executable(joypad_n642nuon)
@@ -932,7 +959,7 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
         ${CMAKE_CURRENT_SOURCE_DIR}/bt/transport/bt_transport_cyw43.c
         ${CMAKE_CURRENT_SOURCE_DIR}/native/device/n64/n64_device.c
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/joybus.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/N64Console.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/joybus-pio/src/N64Console.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/apps/bt2n64/app.c
     )
     target_include_directories(joypad_bt2n64 PUBLIC
