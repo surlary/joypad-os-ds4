@@ -137,9 +137,92 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Build nRF52840 targets (separate job — needs nRF Connect SDK)
+  build-nrf:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: bt2usb_seeed_xiao_nrf52840
+            board: xiao_ble
+            app_type: bt2usb
+          - app: bt2usb_feather_nrf52840
+            board: adafruit_feather_nrf52840
+            app_type: bt2usb
+          - app: usb2usb_feather_nrf52840_max3421
+            board: adafruit_feather_nrf52840
+            app_type: usb2usb
+          - app: btusb2usb_feather_nrf52840
+            board: adafruit_feather_nrf52840
+            app_type: btusb2usb
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.JOYBOT_PAT || secrets.GITHUB_TOKEN }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install west and dependencies
+        run: |
+          pip3 install west
+
+      - name: Cache nRF Connect SDK
+        uses: actions/cache@v4
+        id: ncs-cache
+        with:
+          path: |
+            nrf/.west
+            nrf/nrf
+            nrf/zephyr
+            nrf/modules
+            nrf/bootloader
+            nrf/tools
+            nrf/nrfxlib
+            nrf/test
+          key: ncs-v3.1.0-${{ runner.os }}
+
+      - name: Initialize nRF Connect SDK
+        if: steps.ncs-cache.outputs.cache-hit != 'true'
+        working-directory: nrf
+        run: |
+          west init -m https://github.com/nrfconnect/sdk-nrf.git --mr v3.1.0
+          west update --narrow -o=--depth=1
+
+      - name: Get commit hash
+        id: commit
+        run: echo "hash=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Build ${{ matrix.app }}
+        working-directory: nrf
+        run: |
+          west build -b ${{ matrix.board }} . --pristine=always -- \
+            -DAPP_TYPE=${{ matrix.app_type }} \
+            $([ -f boards/${{ matrix.board }}.overlay ] && echo "-DDTC_OVERLAY_FILE=$(pwd)/boards/${{ matrix.board }}.overlay") \
+            $(EXTRA=""; \
+              [ -f boards/${{ matrix.board }}.conf ] && EXTRA="$(pwd)/boards/${{ matrix.board }}.conf"; \
+              [ -f prj_${{ matrix.app_type }}.conf ] && { [ -n "$EXTRA" ] && EXTRA="$EXTRA;$(pwd)/prj_${{ matrix.app_type }}.conf" || EXTRA="$(pwd)/prj_${{ matrix.app_type }}.conf"; }; \
+              [ -n "$EXTRA" ] && echo "-DEXTRA_CONF_FILE=$EXTRA")
+
+      - name: Copy firmware
+        run: |
+          mkdir -p releases
+          cp nrf/build/nrf/zephyr/zephyr.uf2 \
+            releases/joypad_${{ steps.commit.outputs.hash }}_${{ matrix.app }}.uf2
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.app }}
+          path: releases/*.uf2
+          if-no-files-found: error
+          retention-days: 1
+
   # Collect all artifacts and create combined release package
   collect:
-    needs: [build, build-esp32]
+    needs: [build, build-esp32, build-nrf]
     runs-on: ubuntu-latest
     steps:
       - name: Download all firmware artifacts
@@ -159,7 +242,7 @@ jobs:
           mv artifacts/*.uf2 releases/
 
           # Known board suffixes (order matters - check longer suffixes first)
-          BOARDS="esp32s3 pico2_w pico_w rp2040zero rp2350usba kb2040 feather_rp2040 feather pico macropad"
+          BOARDS="esp32s3 seeed_xiao_nrf52840 feather_nrf52840_max3421 feather_nrf52840 pico2_w pico_w rp2040zero rp2350usba kb2040 feather_rp2040 feather pico macropad"
 
           for file in releases/joypad_*.uf2; do
             if [ -f "$file" ]; then
@@ -279,6 +362,13 @@ jobs:
         with:
           name: joypad_${{ steps.commit.outputs.hash }}_gc2usb
           path: organized/gc2usb/*.uf2
+          if-no-files-found: ignore
+
+      - name: Upload btusb2usb
+        uses: actions/upload-artifact@v4
+        with:
+          name: joypad_${{ steps.commit.outputs.hash }}_btusb2usb
+          path: organized/btusb2usb/*.uf2
           if-no-files-found: ignore
 
       - name: Upload controllers
@@ -451,7 +541,13 @@ jobs:
 
             1. Double-tap reset to enter TinyUF2 mode (USB drive appears)
             2. Drag & drop the `bt2usb_esp32s3.uf2` file to the drive
-            3. See [ESP32 docs](https://github.com/joypad-ai/joypad-os/blob/main/docs/ESP32.md) for first-time TinyUF2 setup
+            3. See [ESP32 docs](https://github.com/joypad-ai/joypad-os/blob/main/docs/platforms/esp32.md) for first-time TinyUF2 setup
+
+            ## Installation (nRF52840)
+
+            1. Double-tap reset to enter UF2 bootloader (USB drive appears)
+            2. Drag & drop the `.uf2` file to the drive (FTHR840BOOT, XIAO-SENSE, etc.)
+            3. See [nRF52840 docs](https://github.com/joypad-ai/joypad-os/blob/main/docs/platforms/nrf52840.md) for details
           files: |
             releases/*
           draft: false
