@@ -98,6 +98,7 @@ jobs:
 
   # Build ESP32 targets (separate job — needs ESP-IDF toolchain)
   build-esp:
+    name: build-esp (${{ matrix.app }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -149,6 +150,7 @@ jobs:
 
   # Build nRF52840 targets (separate job — needs nRF Connect SDK)
   build-nrf:
+    name: build-nrf (${{ matrix.app }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
