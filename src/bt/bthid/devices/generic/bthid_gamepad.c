@@ -298,12 +298,33 @@ void bthid_gamepad_set_descriptor(bthid_device_t* device, const uint8_t* desc, u
     // Release parser memory
     USB_FreeReportInfo(info);
 
+    // Auto-detect swapped Z/RZ vs RX/RY axes.
+    // Some controllers (8BitDo, Sony) use RX/RY for right stick and Z/RZ for triggers,
+    // while others (Xbox, DirectInput) use Z/RZ for right stick and RX/RY for triggers.
+    // Detect by comparing axis resolution: sticks match X/Y resolution, triggers are smaller.
+    if (!gp->map.has_sim_triggers &&
+        gp->map.zLoc.max && gp->map.rzLoc.max &&
+        gp->map.rxLoc.max && gp->map.ryLoc.max &&
+        gp->map.xLoc.max) {
+        // If RX/RY have same resolution as X/Y (stick-like) and Z/RZ are smaller (trigger-like),
+        // swap: RX/RY become right stick, Z/RZ become triggers
+        bool rx_is_stick = (gp->map.rxLoc.max == gp->map.xLoc.max);
+        bool z_is_trigger = (gp->map.zLoc.max < gp->map.xLoc.max);
+        if (rx_is_stick && z_is_trigger) {
+            printf("[BTHID_GAMEPAD] Swapping Z/RZ<->RX/RY (RX/RY=stick, Z/RZ=trigger)\n");
+            ble_usage_loc_t tmp;
+            tmp = gp->map.zLoc;  gp->map.zLoc  = gp->map.rxLoc; gp->map.rxLoc = tmp;
+            tmp = gp->map.rzLoc; gp->map.rzLoc = gp->map.ryLoc; gp->map.ryLoc = tmp;
+        }
+    }
+
     gp->map.is_xbox = (device->vendor_id == 0x045E);
     gp->has_report_map = true;
-    printf("[BTHID_GAMEPAD] Parsed: %d btns, X@%d Y@%d Z@%d RZ@%d hat@%d(min=%d) sim=%d xbox=%d\n",
+    printf("[BTHID_GAMEPAD] Parsed: %d btns, X@%d Y@%d Z@%d RZ@%d RX@%d RY@%d hat@%d(min=%d) sim=%d xbox=%d\n",
            btns_count,
            gp->map.xLoc.byteIndex, gp->map.yLoc.byteIndex,
            gp->map.zLoc.byteIndex, gp->map.rzLoc.byteIndex,
+           gp->map.rxLoc.byteIndex, gp->map.ryLoc.byteIndex,
            gp->map.hatLoc.byteIndex, gp->map.hat_min, gp->map.has_sim_triggers,
            gp->map.is_xbox);
 }
@@ -507,6 +528,22 @@ static void gamepad_process_report(bthid_device_t* device, const uint8_t* data, 
         // that would otherwise be parsed as gamepad data with wrong byte layout
         if (gp->map.report_id && len > 0 && data[0] != gp->map.report_id) {
             return;
+        }
+        // One-time hex dump of first gamepad report for debugging
+        static bool dumped = false;
+        if (!dumped) {
+            dumped = true;
+            printf("[BTHID_GAMEPAD] Report (%d bytes):", len);
+            for (int i = 0; i < len && i < 20; i++) printf(" %02x", data[i]);
+            printf("\n");
+            printf("[BTHID_GAMEPAD] Map: X@%d/%04x Y@%d/%04x Z@%d/%04x RZ@%d/%04x RX@%d/%04x RY@%d/%04x hat@%d\n",
+                   gp->map.xLoc.byteIndex, gp->map.xLoc.bitMask,
+                   gp->map.yLoc.byteIndex, gp->map.yLoc.bitMask,
+                   gp->map.zLoc.byteIndex, gp->map.zLoc.bitMask,
+                   gp->map.rzLoc.byteIndex, gp->map.rzLoc.bitMask,
+                   gp->map.rxLoc.byteIndex, gp->map.rxLoc.bitMask,
+                   gp->map.ryLoc.byteIndex, gp->map.ryLoc.bitMask,
+                   gp->map.hatLoc.byteIndex);
         }
         process_report_dynamic(gp, data, len);
         return;

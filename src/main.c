@@ -109,42 +109,46 @@ static void __not_in_flash_func(core0_main)(void)
 
 int main(void)
 {
-  stdio_init_all();
+  // ========================================================================
+  // PHASE 1: Time-critical — get Core 1 listening ASAP (before stdio/printf)
+  // Console probes happen ~100-500ms after power-on. Every ms counts.
+  // ========================================================================
 
-  printf("\n[joypad] Starting...\n");
-
-  // Launch Core 1 ASAP for flash_safe_execute support
-  // Core 1 will init flash safety and wait for task assignment
+  // Launch Core 1 for flash_safe_execute support
   multicore_launch_core1(core1_wrapper);
-  sleep_ms(1);  // Minimal delay to let Core 1 call flash_safe_execute_core_init()
 
-  // Initialize output interfaces and start Core 1 task FIRST.
-  // Timing-critical protocols (joybus, maple bus) must start listening ASAP —
-  // consoles probe for controllers at boot and may stop permanently if missed.
-  // Output init only needs PIO/GPIO — no dependency on app/input/profile init.
+  // PIO/joybus init — no dependency on stdio, flash, or profiles
   outputs = app_get_output_interfaces(&output_count);
   if (output_count > 0 && outputs[0]) {
     active_output = outputs[0];
   }
   for (uint8_t i = 0; i < output_count; i++) {
     if (outputs[i] && outputs[i]->init) {
-      printf("[joypad] Initializing output: %s\n", outputs[i]->name);
       outputs[i]->init();
     }
   }
 
-  // Find and signal core1 task so console detection starts immediately
+  // Signal Core 1 to start listening — no printf, no delay!
+  // Core 1's flash_safe_execute_core_init() runs in parallel and finishes
+  // before the __wfe() check. The __sev() sets the event flag so Core 1
+  // proceeds as soon as flash_safe_init completes.
   for (uint8_t i = 0; i < output_count; i++) {
     if (outputs[i] && outputs[i]->core1_task) {
-      printf("[joypad] Core1 task from: %s\n", outputs[i]->name);
       core1_actual_task = outputs[i]->core1_task;
       break;
     }
   }
-  printf("[joypad] Signaling core1 (task: %s)\n",
-         core1_actual_task ? "yes" : "idle");
   core1_task_ready = true;
   __sev();
+
+  // ========================================================================
+  // PHASE 2: Non-critical init — Core 1 is already listening
+  // ========================================================================
+
+  stdio_init_all();
+  printf("\n[joypad] Output: %s, Core1: %s\n",
+         output_count > 0 ? outputs[0]->name : "none",
+         core1_actual_task ? "active" : "idle");
 
   // Now initialize core services and app (slower — BT, USB host, etc.)
   // Core 1 is already listening for console probes while this runs.

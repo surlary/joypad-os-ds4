@@ -57,8 +57,21 @@ extern volatile uint8_t n64_diag_last_cmd;
 extern volatile uint32_t n64_diag_probe_count;
 extern volatile uint32_t n64_diag_rx_count;
 extern volatile uint32_t n64_diag_pak_read_count;
+extern volatile uint32_t n64_diag_pak_write_count;
+extern volatile uint16_t n64_diag_last_read_addr;
+extern volatile uint16_t n64_diag_last_write_addr;
+extern volatile uint8_t n64_diag_write_crc;
+extern volatile uint8_t n64_diag_write_data[4];
 extern volatile uint8_t n64_diag_last_rx;
 extern volatile uint8_t n64_diag_phase;
+extern volatile uint32_t n64_diag_listen_time_us;
+extern volatile uint32_t n64_diag_first_rx_us;
+extern volatile uint8_t n64_boot_cmds[];
+extern volatile uint8_t n64_boot_cmd_count;
+extern volatile uint16_t n64_diag_first_write_addr;
+extern volatile uint8_t n64_diag_first_write_crc;
+extern volatile uint8_t n64_diag_first_write_data[4];
+extern volatile uint16_t n64_diag_first_read_addr;
 
 // LED patterns:
 //   Fast blink  (100ms): N64 console not communicating
@@ -173,6 +186,10 @@ const OutputInterface** app_get_output_interfaces(uint8_t* count)
 
 void app_init(void)
 {
+    // N64 late init: flash, profiles, GPIO — deferred from n64_init() so Core 1
+    // could start listening for console probes as early as possible.
+    n64_late_init();
+
     printf("[app:bt2n64] Initializing BT2N64 v%s\n", APP_VERSION);
     printf("[app:bt2n64] Pico W built-in Bluetooth -> N64\n");
 
@@ -281,14 +298,44 @@ void app_task(void)
             }
         }
 
-        printf("[diag] rx=%lu probe=%lu poll=%lu pak=%lu lastRx=0x%02x lastCmd=0x%02x phase=%d edges=%d\n",
+        // Print boot command sequence when it changes
+        static uint8_t last_boot_count = 0;
+        if (n64_boot_cmd_count > 0 && n64_boot_cmd_count != last_boot_count) {
+            last_boot_count = n64_boot_cmd_count;
+            printf("[diag] Boot cmds (%d):", n64_boot_cmd_count);
+            for (int i = 0; i < n64_boot_cmd_count; i++) {
+                printf(" %02x", n64_boot_cmds[i]);
+            }
+            printf("\n");
+            printf("[diag] 1st rd=0x%04x 1st wr=0x%04x 1stWrCrc=0x%02x 1stWrD=%02x%02x%02x%02x\n",
+                   n64_diag_first_read_addr, n64_diag_first_write_addr,
+                   n64_diag_first_write_crc,
+                   n64_diag_first_write_data[0], n64_diag_first_write_data[1],
+                   n64_diag_first_write_data[2], n64_diag_first_write_data[3]);
+        }
+
+        extern n64_report_t n64_report;
+        extern volatile bool n64_router_has_data;
+        extern volatile bool n64_player_assigned;
+        uint8_t *rpt = (uint8_t *)&n64_report;
+        // Also grab raw router event to trace button mapping
+        const input_event_t* evt = router_get_output(OUTPUT_TARGET_N64, 0);
+        uint32_t raw_btn = evt ? evt->buttons : 0;
+        printf("[diag] rpt=%02x%02x sx=%d sy=%d btn=0x%08lx data=%d plyr=%d pc=%d\n",
+               rpt[0], rpt[1], n64_report.stick_x, n64_report.stick_y,
+               (unsigned long)raw_btn,
+               (int)n64_router_has_data, (int)n64_player_assigned, playersCount);
+        printf("[diag] rx=%lu probe=%lu poll=%lu rd=%lu wr=%lu rdA=0x%04x wrA=0x%04x crc=0x%02x d=%02x%02x%02x%02x edges=%d\n",
                (unsigned long)n64_diag_rx_count,
                (unsigned long)n64_diag_probe_count,
                (unsigned long)n64_diag_poll_count,
                (unsigned long)n64_diag_pak_read_count,
-               n64_diag_last_rx,
-               n64_diag_last_cmd,
-               n64_diag_phase,
+               (unsigned long)n64_diag_pak_write_count,
+               n64_diag_last_read_addr,
+               n64_diag_last_write_addr,
+               n64_diag_write_crc,
+               n64_diag_write_data[0], n64_diag_write_data[1],
+               n64_diag_write_data[2], n64_diag_write_data[3],
                edges);
     }
 

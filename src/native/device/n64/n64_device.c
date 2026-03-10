@@ -66,20 +66,24 @@ static const char* n64_get_profile_name(uint8_t index) {
 
 void n64_init()
 {
-    // N64 joybus runs at standard clock (no overclock needed unlike GameCube)
-
-    // PIO/joybus setup FIRST — this is time-critical.
+    // ONLY PIO/joybus setup here — nothing else!
+    // Core 1 is signaled immediately after this returns, so every μs counts.
     // Console probes for controllers at boot and may stop if no response.
+    // Non-PIO init (flash, profiles, GPIO) deferred to n64_late_init().
     int sm = -1;
     int offset = -1;
 
     N64Console_init(&n64, N64_DATA_PIN, pio, sm, offset);
     n64_report = default_n64_report;
+}
 
+// Deferred init: called after Core 1 is already listening for console probes.
+// Safe to do slow operations (flash, printf, GPIO) here.
+void n64_late_init()
+{
     printf("[n64] Joybus on PIO%d GP%d SM=%d (ready)\n",
            pio == pio0 ? 0 : 1, N64_DATA_PIN, n64._port.sm);
 
-    // Non-critical init (can happen after Core 1 starts listening)
     // Configure custom UART pins (only for boards with dedicated UART)
     #ifdef UART_TX_PIN
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
@@ -143,17 +147,13 @@ void n64_init()
 // via n64_task() instead.
 void __not_in_flash_func(core1_task)(void)
 {
-    printf("[n64] Core 1 started, listening for console...\n");
-
-    // Skip separate Detect phase — go straight to WaitForPoll which:
-    // 1. Is fully flash-safe (uses RAM-only helpers)
-    // 2. Handles all command types (PROBE, RESET, POLL, READ, WRITE)
-    // 3. Sets n64_console_active on first received command
-    // 4. Never has gaps in listening (no SM re-init between attempts)
+    // No printf here — Core 1 starts before stdio_init_all() for fastest boot.
     //
-    // N64Console_Detect used flash-resident functions (busy_wait_us,
-    // joybus_send_bytes) which could hang when Core 0 locks flash during
-    // BT/CYW43 initialization, causing missed probe response windows.
+    // WaitForPoll is entirely RAM-safe (no flash-resident calls).
+    // Cannot use N64Console_Detect here — it calls busy_wait_us/joybus_send_bytes
+    // (flash-resident), and Core 0's CYW43 may lock flash at any time after boot.
+    // WaitForPoll's n64_send_bytes replicates joybus_send_bytes behavior using
+    // only inline PIO functions (pio_sm_set_config, pio_sm_restart, etc.).
     while (1) {
         N64Console_WaitForPoll(&n64);
     }
