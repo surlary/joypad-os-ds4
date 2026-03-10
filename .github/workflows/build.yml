@@ -46,6 +46,8 @@ jobs:
           - bt2usb_pico2_w
           - bt2n64_pico_w
           - bt2n64_pico2_w
+          - btusb2usb_pico_w
+          - btusb2usb_pico2_w
           - snes2usb_kb2040
           - n642usb_kb2040
           - nes2usb_pico_w
