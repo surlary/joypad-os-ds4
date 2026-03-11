@@ -720,6 +720,10 @@ static struct {
 
 void btstack_host_start_scan(void)
 {
+#ifdef CONFIG_USB2BLE
+    return;  // USB2BLE is BLE peripheral only — no scanning for input devices
+#endif
+
     if (!hid_state.powered_on) {
         printf("[BTSTACK_HOST] Not powered on yet\n");
         return;
@@ -742,8 +746,9 @@ void btstack_host_start_scan(void)
         hid_state.scan_start_time = btstack_run_loop_get_time_ms();
     }
 
-#if !defined(BTSTACK_USE_ESP32) && !defined(BTSTACK_USE_NRF)
-    // Also start classic BT inquiry (not available on ESP32-S3 BLE-only)
+#if !defined(BTSTACK_USE_ESP32) && !defined(BTSTACK_USE_NRF) && !defined(CONFIG_USB2BLE)
+    // Also start classic BT inquiry (not available on ESP32-S3/nRF BLE-only)
+    // Skip in USB2BLE mode — Classic inquiry interferes with BLE advertising
     // Alternate between GIAC (general) and LIAC (limited) to discover Wiimotes/Wii U Pro
     // which use Limited Discoverable mode when SYNC button is pressed
     uint32_t lap = classic_state.use_liac ? GAP_IAC_LIMITED_INQUIRY : GAP_IAC_GENERAL_INQUIRY;
@@ -937,6 +942,7 @@ void btstack_host_process(void)
     // Skip if:
     //   - waiting for incoming Classic reconnection (outgoing HID failed)
     //   - Classic connection setup in progress (name request, HID connect pending)
+#ifndef CONFIG_USB2BLE
     if (hid_state.powered_on &&
         hid_state.state == BLE_STATE_IDLE &&
         hid_state.reconnect_attempt_time == 0 &&
@@ -947,6 +953,7 @@ void btstack_host_process(void)
         printf("[BTSTACK_HOST] Safety: idle with no connections, resuming scan\n");
         btstack_host_start_scan();
     }
+#endif
 
     // State/scan_active sync: if BLE scan is running but state is not SCANNING,
     // fix the desync so the advertising handler can auto-connect to devices.
@@ -1137,7 +1144,6 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 // Set class of device to Computer (Desktop Workstation)
                 // Skip when acting as BLE peripheral — appearance is set in adv data
                 gap_set_class_of_device(0x000104);  // Major: Computer, Minor: Desktop
-#endif
 
                 // Enable SSP (Secure Simple Pairing) on the controller
                 extern const hci_cmd_t hci_write_simple_pairing_mode;
@@ -1153,12 +1159,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 gap_discoverable_control(1);
                 gap_connectable_control(1);
 #endif
+                // USB2BLE: Classic BT stays non-discoverable/non-connectable by default
+#endif
 
+#ifndef CONFIG_USB2BLE
                 // Restore last connected device from NVS (for reconnection after reboot)
                 btstack_host_restore_last_connected();
 
                 // Always start scanning (discovers new devices + triggers periodic reconnect)
                 btstack_host_start_scan();
+#endif
             }
             break;
 
@@ -1494,6 +1504,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         case GAP_EVENT_INQUIRY_COMPLETE:
             classic_state.inquiry_active = false;
             classic_state.recovery_start_time = 0;  // BT transport is working
+#ifndef CONFIG_USB2BLE
             // Restart inquiry after it completes (if we're still in scan mode)
             // Toggle between GIAC and LIAC to discover all device types
             if (hid_state.state == BLE_STATE_SCANNING) {
@@ -1505,6 +1516,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 gap_inquiry_start(INQUIRY_DURATION);
                 classic_state.inquiry_active = true;
             }
+#endif
             break;
 
         // Classic BT incoming connection request (DS3 connects this way)
@@ -1734,6 +1746,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
         }
 
         case HCI_EVENT_LE_META: {
+#ifdef CONFIG_USB2BLE
+            break;  // USB2BLE is a BLE peripheral — ble_output handles LE events
+#endif
             uint8_t subevent = hci_event_le_meta_get_subevent_code(packet);
 
             switch (subevent) {
@@ -2349,6 +2364,10 @@ static void sm_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *pa
     UNUSED(size);
 
     if (packet_type != HCI_EVENT_PACKET) return;
+
+#ifdef CONFIG_USB2BLE
+    return;  // USB2BLE is a BLE peripheral — ble_output handles SM events
+#endif
 
     uint8_t event_type = hci_event_packet_get_type(packet);
 

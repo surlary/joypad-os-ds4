@@ -1,18 +1,30 @@
-// ble_output.c - BLE Composite HID Output Interface (HOGP Peripheral)
+// ble_output.c - BLE HID Output Interface (HOGP Peripheral)
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024 Robert Dale Smith
 //
-// Implements OutputInterface for BLE HID composite output (gamepad + keyboard + mouse)
-// using BTstack's hids_device GATT service. Appears as a wireless HID device via HOGP.
+// Implements OutputInterface for BLE HID output using BTstack's hids_device
+// GATT service. Supports two modes:
+//   - Standard: Composite gamepad + keyboard + mouse (ESP32-BLE-CompositeHID compatible)
+//   - Xbox BLE: Xbox One S / Series X compatible gamepad with rumble
 
 #include "ble_output.h"
 #include "ble_output_keyboard.h"
 #include "ble_output_mouse.h"
+#include "ble_output_xbox.h"
 #include "ble_gamepad.h"  // Generated from ble_gamepad.gatt by compile_gatt.py
+
+// Xbox GATT database (compiled from ble_xbox.gatt, wrapped in ble_xbox_gatt_db.c)
+extern const uint8_t *ble_xbox_profile_data;
 
 #include "core/buttons.h"
 #include "core/input_event.h"
 #include "core/router/router.h"
+#include "core/services/players/feedback.h"
+#include "core/services/storage/flash.h"
+#include "platform/platform.h"
+
+// Forward declare to avoid pulling in manager.h (TinyUSB type conflicts)
+extern void feedback_set_rumble(uint8_t player_index, uint8_t left, uint8_t right);
 
 // BTstack includes
 #include "btstack_defines.h"
@@ -32,10 +44,10 @@
 #include <string.h>
 
 // ============================================================================
-// HID REPORT DESCRIPTOR — Composite: Keyboard + Mouse + Gamepad
+// HID REPORT DESCRIPTOR — Standard Composite: Keyboard + Mouse + Gamepad
 // ============================================================================
 
-static const uint8_t ble_hid_descriptor[] = {
+static const uint8_t standard_hid_descriptor[] = {
     // ---- Keyboard (Report ID 1) ----
     0x05, 0x01,        // Usage Page (Generic Desktop)
     0x09, 0x06,        // Usage (Keyboard)
@@ -204,7 +216,7 @@ static const uint8_t ble_hid_descriptor[] = {
 // BLE REPORT STRUCTURES
 // ============================================================================
 
-// Gamepad report (15 bytes, Report ID 3)
+// Standard gamepad report (15 bytes, Report ID 3)
 typedef struct __attribute__((packed)) {
     uint8_t buttons_lo;     // Buttons 1-8
     uint8_t buttons_hi;     // Buttons 9-16
@@ -217,7 +229,7 @@ typedef struct __attribute__((packed)) {
     int16_t rt;             // Right trigger (0-32767)
 } ble_gamepad_report_t;
 
-// Hat switch values (0-7 = directions, 8 = center/null)
+// Hat switch values
 #define BLE_HAT_CENTER      0
 #define BLE_HAT_UP          1
 #define BLE_HAT_UP_RIGHT    2
@@ -229,7 +241,7 @@ typedef struct __attribute__((packed)) {
 #define BLE_HAT_UP_LEFT     8
 
 // ============================================================================
-// PENDING REPORT — type-tagged union for flow-controlled sending
+// PENDING REPORT — type-tagged for flow-controlled sending
 // ============================================================================
 
 typedef enum {
@@ -237,6 +249,7 @@ typedef enum {
     PENDING_GAMEPAD,
     PENDING_KEYBOARD,
     PENDING_MOUSE,
+    PENDING_XBOX,
 } pending_report_type_t;
 
 // ============================================================================
@@ -246,23 +259,25 @@ typedef enum {
 static hci_con_handle_t con_handle = HCI_CON_HANDLE_INVALID;
 static bool ble_connected = false;
 
-// Pending report (flow-controlled — only one at a time)
+// Pending reports (flow-controlled — only one at a time)
 static pending_report_type_t pending_type = PENDING_NONE;
 static ble_gamepad_report_t pending_gamepad;
 static ble_keyboard_report_t pending_keyboard;
 static ble_mouse_report_t pending_mouse;
+static ble_xbox_report_t pending_xbox;
 
 // Last sent reports (for change detection)
 static ble_gamepad_report_t last_sent_gamepad;
 static ble_keyboard_report_t last_sent_keyboard;
 static ble_mouse_report_t last_sent_mouse;
+static ble_xbox_report_t last_sent_xbox;
 
 // Report storage for hids_device_init_with_storage()
-// 6 reports: keyboard input, keyboard output, mouse input, gamepad input, player output, feature
+// 6 slots covers both modes (standard: 6 reports, xbox: 3 reports)
 static hids_device_report_t hid_report_storage[6];
 #define HID_REPORT_STORAGE_COUNT (sizeof(hid_report_storage) / sizeof(hid_report_storage[0]))
 
-// Mode
+// Mode (loaded from flash on init)
 static ble_output_mode_t current_mode = BLE_MODE_STANDARD;
 
 static btstack_packet_callback_registration_t hci_event_callback_registration;
@@ -272,7 +287,7 @@ static btstack_packet_callback_registration_t sm_event_callback_registration;
 // ADVERTISING DATA
 // ============================================================================
 
-static const uint8_t adv_data[] = {
+static const uint8_t adv_data_standard[] = {
     // Flags: general discoverable, BR/EDR not supported
     0x02, BLUETOOTH_DATA_TYPE_FLAGS, 0x06,
     // Complete local name: "Joypad Gamepad"
@@ -287,11 +302,25 @@ static const uint8_t adv_data[] = {
     0x03, BLUETOOTH_DATA_TYPE_APPEARANCE, 0xC4, 0x03,
 };
 
+static const uint8_t adv_data_xbox[] = {
+    // Flags: general discoverable, BR/EDR not supported
+    0x02, BLUETOOTH_DATA_TYPE_FLAGS, 0x06,
+    // Complete local name: "Joypad Xinput"
+    0x0E, BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME,
+    'J', 'o', 'y', 'p', 'a', 'd', ' ',
+    'X', 'i', 'n', 'p', 'u', 't',
+    // 16-bit Service UUIDs: HID Service
+    0x03, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS,
+    ORG_BLUETOOTH_SERVICE_HUMAN_INTERFACE_DEVICE & 0xFF,
+    ORG_BLUETOOTH_SERVICE_HUMAN_INTERFACE_DEVICE >> 8,
+    // Appearance: Gamepad (0x03C4)
+    0x03, BLUETOOTH_DATA_TYPE_APPEARANCE, 0xC4, 0x03,
+};
+
 // ============================================================================
-// CONVERSION HELPERS
+// STANDARD MODE CONVERSION HELPERS
 // ============================================================================
 
-// Convert Joypad buttons to BLE gamepad 16-bit button field
 static uint16_t convert_buttons(uint32_t buttons)
 {
     uint16_t ble_buttons = 0;
@@ -314,7 +343,6 @@ static uint16_t convert_buttons(uint32_t buttons)
     return ble_buttons;
 }
 
-// Convert Joypad dpad to hat switch value
 static uint8_t convert_dpad_to_hat(uint32_t buttons)
 {
     uint8_t up    = (buttons & JP_BUTTON_DU) ? 1 : 0;
@@ -388,6 +416,11 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                                     (const uint8_t *)&pending_mouse, sizeof(pending_mouse));
                                 last_sent_mouse = pending_mouse;
                                 break;
+                            case PENDING_XBOX:
+                                hids_device_send_input_report_for_id(con_handle, 3,
+                                    (const uint8_t *)&pending_xbox, sizeof(pending_xbox));
+                                last_sent_xbox = pending_xbox;
+                                break;
                             default:
                                 break;
                         }
@@ -397,13 +430,19 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 
                 case HIDS_SUBEVENT_SET_REPORT: {
                     uint8_t report_id = hids_subevent_set_report_get_report_id(packet);
-                    uint8_t report_type = hids_subevent_set_report_get_report_type(packet);
-                    (void)report_type;
-                    if (report_id == 1) {
-                        // Keyboard LED output report — ignore for now
-                    } else if (report_id == 4) {
-                        // Player indicator output report — ignore for now
+                    uint16_t report_len = hids_subevent_set_report_get_report_length(packet);
+                    const uint8_t *report_data = hids_subevent_set_report_get_report_data(packet);
+
+                    if (current_mode == BLE_MODE_XBOX && report_id == 4) {
+                        // Xbox rumble output report
+                        uint8_t rumble_left, rumble_right;
+                        if (ble_xbox_parse_rumble(report_data, report_len,
+                                                  &rumble_left, &rumble_right)) {
+                            // Forward rumble to connected input controller
+                            feedback_set_rumble(0, rumble_left, rumble_right);
+                        }
                     }
+                    // Standard mode: report_id 1 = keyboard LEDs, report_id 4 = player indicator
                     break;
                 }
 
@@ -423,12 +462,20 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 
 void ble_output_init(void)
 {
-    printf("[ble_output] Initializing BLE Composite HID output (early)\n");
+    // Load mode from flash
+    flash_init();
+    flash_t *settings = flash_get_settings();
+    if (settings && settings->ble_output_mode < BLE_MODE_COUNT) {
+        current_mode = (ble_output_mode_t)settings->ble_output_mode;
+    }
 
-    // Initialize gamepad report to neutral state
+    printf("[ble_output] Initializing BLE output (mode: %s)\n",
+           ble_output_get_mode_name(current_mode));
+
+    // Initialize reports to neutral state
     memset(&pending_gamepad, 0, sizeof(pending_gamepad));
     pending_gamepad.hat = BLE_HAT_CENTER;
-    pending_gamepad.lx = 16384;  // 0x4000 = center of 0-32767
+    pending_gamepad.lx = 16384;
     pending_gamepad.ly = 16384;
     pending_gamepad.rx = 16384;
     pending_gamepad.ry = 16384;
@@ -436,43 +483,100 @@ void ble_output_init(void)
 
     memset(&last_sent_keyboard, 0, sizeof(last_sent_keyboard));
     memset(&last_sent_mouse, 0, sizeof(last_sent_mouse));
+
+    memset(&pending_xbox, 0, sizeof(pending_xbox));
+    pending_xbox.lx = 32768;
+    pending_xbox.ly = 32768;
+    pending_xbox.rx = 32768;
+    pending_xbox.ry = 32768;
+    last_sent_xbox = pending_xbox;
 }
 
 // Called after bt_init() — BTstack must be running before GATT/GAP setup
 void ble_output_late_init(void)
 {
-    printf("[ble_output] Setting up BLE GATT services\n");
+    printf("[ble_output] Setting up BLE GATT services (mode: %s)\n",
+           ble_output_get_mode_name(current_mode));
 
-    // Setup ATT server with compiled GATT profile
-    att_server_init(profile_data, NULL, NULL);
+    // Setup ATT server with mode-appropriate GATT profile
+    const uint8_t *gatt_db = (current_mode == BLE_MODE_XBOX)
+        ? ble_xbox_profile_data : profile_data;
+    printf("[ble_output] Using %s GATT database (ptr=%p)\n",
+           (current_mode == BLE_MODE_XBOX) ? "Xbox" : "Standard", gatt_db);
+    att_server_init(gatt_db, NULL, NULL);
 
     // Setup GATT services
     battery_service_server_init(100);
     device_information_service_server_init();
-    device_information_service_server_set_manufacturer_name("Joypad");
-    device_information_service_server_set_model_number("USB2BLE");
-    device_information_service_server_set_software_revision("1.0.0");
-    // PnP ID: Bluetooth SIG (0x01), VID 0xe502, PID 0xbbab, version 1.0.0
-    device_information_service_server_set_pnp_id(0x01, 0xe502, 0xbbab, 0x0100);
 
-    // Setup HID Device service (6 reports need custom storage)
-    hids_device_init_with_storage(0, ble_hid_descriptor, sizeof(ble_hid_descriptor),
+    // Mode-dependent PnP ID and device info
+    if (current_mode == BLE_MODE_XBOX) {
+        device_information_service_server_set_manufacturer_name("Microsoft");
+        device_information_service_server_set_model_number("Xbox Wireless Controller");
+        device_information_service_server_set_software_revision("1.0.0");
+        // PnP ID: USB IF (0x02), Microsoft VID 0x045E, Xbox Series X PID 0x0B13, version 5.17.0
+        device_information_service_server_set_pnp_id(0x02, 0x045E, 0x0B13, 0x0511);
+    } else {
+        device_information_service_server_set_manufacturer_name("Joypad");
+        device_information_service_server_set_model_number("USB2BLE");
+        device_information_service_server_set_software_revision("1.0.0");
+        // PnP ID: Bluetooth SIG (0x01), VID 0xe502, PID 0xbbab, version 1.0.0
+        device_information_service_server_set_pnp_id(0x01, 0xe502, 0xbbab, 0x0100);
+    }
+
+    // Setup HID Device service with mode-appropriate descriptor
+    const uint8_t *hid_desc;
+    uint16_t hid_desc_size;
+    if (current_mode == BLE_MODE_XBOX) {
+        hid_desc = ble_xbox_get_descriptor();
+        hid_desc_size = ble_xbox_get_descriptor_size();
+    } else {
+        hid_desc = standard_hid_descriptor;
+        hid_desc_size = sizeof(standard_hid_descriptor);
+    }
+    hids_device_init_with_storage(0, hid_desc, hid_desc_size,
         HID_REPORT_STORAGE_COUNT, hid_report_storage);
 
     // Setup Security Manager: No Input No Output, bonding enabled
     sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
     sm_set_authentication_requirements(SM_AUTHREQ_SECURE_CONNECTION | SM_AUTHREQ_BONDING);
 
-    // Override GAP local name (btstack_host sets "Joypad Adapter" for host mode)
-    gap_set_local_name("Joypad Gamepad");
+    // Each mode uses a distinct BLE address so hosts see them as separate devices.
+    // Derive a static random address from the real BD_ADDR, with mode in the last byte.
+    // Static random addresses have the two MSBs of the first byte set to 11.
+    if (current_mode != BLE_MODE_STANDARD) {
+        bd_addr_t base_addr;
+        gap_local_bd_addr(base_addr);
+        bd_addr_t mode_addr;
+        memcpy(mode_addr, base_addr, 6);
+        mode_addr[5] ^= (uint8_t)current_mode;  // Vary last byte by mode
+        mode_addr[0] |= 0xC0;                   // Mark as static random address
+        gap_random_address_set(mode_addr);
+        gap_random_address_set_mode(GAP_RANDOM_ADDRESS_TYPE_STATIC);
+        printf("[ble_output] Using distinct BLE address for mode %d\n", current_mode);
+    }
 
-    // Setup advertisements
+    // Mode-dependent GAP name and advertising
+    const char *gap_name;
+    const uint8_t *adv_data;
+    uint16_t adv_data_len;
+    if (current_mode == BLE_MODE_XBOX) {
+        gap_name = "Joypad Xinput";
+        adv_data = adv_data_xbox;
+        adv_data_len = sizeof(adv_data_xbox);
+    } else {
+        gap_name = "Joypad Gamepad";
+        adv_data = adv_data_standard;
+        adv_data_len = sizeof(adv_data_standard);
+    }
+    gap_set_local_name(gap_name);
+
     uint16_t adv_int_min = 0x0030;  // 30ms
     uint16_t adv_int_max = 0x0030;  // 30ms
     bd_addr_t null_addr;
     memset(null_addr, 0, 6);
     gap_advertisements_set_params(adv_int_min, adv_int_max, 0, 0, null_addr, 0x07, 0x00);
-    gap_advertisements_set_data(sizeof(adv_data), (uint8_t *)adv_data);
+    gap_advertisements_set_data(adv_data_len, (uint8_t *)adv_data);
     gap_advertisements_enable(1);
 
     // Register event handlers
@@ -484,25 +588,23 @@ void ble_output_late_init(void)
 
     hids_device_register_packet_handler(packet_handler);
 
-    printf("[ble_output] BLE Composite HID advertising as 'Joypad Gamepad'\n");
+    printf("[ble_output] BLE advertising as '%s'\n", gap_name);
 }
 
-void ble_output_task(void)
-{
-    if (!ble_connected || con_handle == HCI_CON_HANDLE_INVALID) return;
+// ============================================================================
+// TASK — Standard mode (composite: gamepad + keyboard + mouse)
+// ============================================================================
 
-    // Poll router for latest input
+static void ble_output_task_standard(void)
+{
     const input_event_t *event = router_get_output(OUTPUT_TARGET_BLE_PERIPHERAL, 0);
     if (!event) return;
 
-    // Route by input device type
     switch (event->type) {
         case INPUT_TYPE_KEYBOARD: {
             ble_keyboard_report_t report;
             ble_keyboard_report_from_event(event, &report);
-
             if (memcmp(&report, &last_sent_keyboard, sizeof(report)) == 0) return;
-
             pending_keyboard = report;
             pending_type = PENDING_KEYBOARD;
             hids_device_request_can_send_now_event(con_handle);
@@ -512,10 +614,7 @@ void ble_output_task(void)
         case INPUT_TYPE_MOUSE: {
             ble_mouse_report_t report;
             ble_mouse_report_from_event(event, &report);
-
-            // Always send mouse reports (relative motion resets to 0, so "no change" is still meaningful)
             if (memcmp(&report, &last_sent_mouse, sizeof(report)) == 0) return;
-
             pending_mouse = report;
             pending_type = PENDING_MOUSE;
             hids_device_request_can_send_now_event(con_handle);
@@ -523,7 +622,6 @@ void ble_output_task(void)
         }
 
         default: {
-            // Gamepad (default for all controller types)
             #define SCALE_8_TO_16(v) ((int16_t)((uint32_t)(v) * 32767 / 255))
             ble_gamepad_report_t report;
             uint16_t buttons = convert_buttons(event->buttons);
@@ -536,14 +634,45 @@ void ble_output_task(void)
             report.ry = SCALE_8_TO_16(event->analog[ANALOG_RY]);
             report.lt = SCALE_8_TO_16(event->analog[ANALOG_L2]);
             report.rt = SCALE_8_TO_16(event->analog[ANALOG_R2]);
-
             if (memcmp(&report, &last_sent_gamepad, sizeof(report)) == 0) return;
-
             pending_gamepad = report;
             pending_type = PENDING_GAMEPAD;
             hids_device_request_can_send_now_event(con_handle);
             break;
         }
+    }
+}
+
+// ============================================================================
+// TASK — Xbox BLE mode (gamepad only, with rumble feedback)
+// ============================================================================
+
+static void ble_output_task_xbox(void)
+{
+    const input_event_t *event = router_get_output(OUTPUT_TARGET_BLE_PERIPHERAL, 0);
+    if (!event) return;
+
+    ble_xbox_report_t report;
+    ble_xbox_report_from_event(event, &report);
+    if (memcmp(&report, &last_sent_xbox, sizeof(report)) == 0) return;
+
+    pending_xbox = report;
+    pending_type = PENDING_XBOX;
+    hids_device_request_can_send_now_event(con_handle);
+}
+
+// ============================================================================
+// MAIN TASK DISPATCH
+// ============================================================================
+
+void ble_output_task(void)
+{
+    if (!ble_connected || con_handle == HCI_CON_HANDLE_INVALID) return;
+
+    if (current_mode == BLE_MODE_XBOX) {
+        ble_output_task_xbox();
+    } else {
+        ble_output_task_standard();
     }
 }
 
@@ -558,8 +687,25 @@ ble_output_mode_t ble_output_get_mode(void)
 
 void ble_output_set_mode(ble_output_mode_t mode)
 {
-    if (mode >= BLE_MODE_COUNT) return;
-    current_mode = mode;
+    if (mode >= BLE_MODE_COUNT || mode == current_mode) return;
+
+    printf("[ble_output] Switching mode from %s to %s\n",
+           ble_output_get_mode_name(current_mode),
+           ble_output_get_mode_name(mode));
+
+    // Save to flash
+    flash_t *settings = flash_get_settings();
+    if (settings) {
+        settings->ble_output_mode = (uint8_t)mode;
+        flash_save_force(settings);
+    }
+
+    // Brief delay to allow flash write to complete
+    platform_sleep_ms(50);
+
+    // Reboot to apply new HID descriptor
+    printf("[ble_output] Rebooting for new HID descriptor...\n");
+    platform_reboot();
 }
 
 ble_output_mode_t ble_output_get_next_mode(void)
@@ -570,7 +716,7 @@ ble_output_mode_t ble_output_get_next_mode(void)
 const char* ble_output_get_mode_name(ble_output_mode_t mode)
 {
     switch (mode) {
-        case BLE_MODE_STANDARD: return "Standard (Composite)";
+        case BLE_MODE_STANDARD: return "Standard";
         case BLE_MODE_XBOX:     return "Xbox BLE";
         default:                return "Unknown";
     }
@@ -590,7 +736,7 @@ void ble_output_get_mode_color(ble_output_mode_t mode, uint8_t *r, uint8_t *g, u
 // ============================================================================
 
 const OutputInterface ble_output_interface = {
-    .name = "BLE Composite HID",
+    .name = "BLE HID",
     .target = OUTPUT_TARGET_BLE_PERIPHERAL,
     .init = ble_output_init,
     .task = ble_output_task,

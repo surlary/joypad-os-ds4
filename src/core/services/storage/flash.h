@@ -65,8 +65,11 @@ typedef struct {
     uint8_t wiimote_orient_mode; // Wiimote orientation mode (0=Auto, 1=Horizontal, 2=Vertical)
     uint8_t custom_profile_count; // Number of custom profiles (0-4)
 
-    // Reserved for future global settings (20 bytes)
-    uint8_t reserved[20];
+    // Global settings (continued)
+    uint8_t ble_output_mode;     // BLE output mode (0=Standard composite, 1=Xbox BLE)
+
+    // Reserved for future global settings (19 bytes)
+    uint8_t reserved[19];
 
     // Custom profiles (4 x 56 = 224 bytes)
     custom_profile_t profiles[CUSTOM_PROFILE_MAX_COUNT];

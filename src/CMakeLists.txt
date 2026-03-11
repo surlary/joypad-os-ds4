@@ -1203,6 +1203,7 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
         ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_output.c
         ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_output_keyboard.c
         ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_output_mouse.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_output_xbox.c
         ${CMAKE_CURRENT_SOURCE_DIR}/apps/usb2ble/app.c
     )
     target_include_directories(joypad_usb2ble PUBLIC
@@ -1214,6 +1215,16 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
         ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output
         ${BTSTACK_INCLUDES}
     )
+    # Xbox BLE GATT database — compiled as a separate library to avoid
+    # profile_data symbol collision with the standard composite GATT.
+    add_library(usb2ble_xbox_gatt OBJECT
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_xbox_gatt_db.c
+    )
+    target_include_directories(usb2ble_xbox_gatt PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output
+        ${BTSTACK_INCLUDES}
+    )
+    pico_btstack_make_gatt_header(usb2ble_xbox_gatt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_xbox.gatt)
     target_link_libraries(joypad_usb2ble PRIVATE
         ${COMMON_LIBRARIES}
         tinyusb_device
@@ -1222,6 +1233,7 @@ if (PICO_BOARD STREQUAL "pico_w" OR PICO_BOARD STREQUAL "pico2_w")
         pico_btstack_ble
         pico_btstack_classic
         pico_btstack_cyw43
+        usb2ble_xbox_gatt
     )
     pico_btstack_make_gatt_header(joypad_usb2ble PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/bt/ble_output/ble_gamepad.gatt)
     joypad_target_common(joypad_usb2ble)

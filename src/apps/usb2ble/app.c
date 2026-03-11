@@ -65,12 +65,12 @@ static void on_button_event(button_event_t event)
             break;
 
         case BUTTON_EVENT_DOUBLE_CLICK: {
+            // Cycle BLE output mode (Standard ↔ Xbox BLE)
+            // set_mode saves to flash and reboots
             ble_output_mode_t next = ble_output_get_next_mode();
-            printf("[app:usb2ble] Double-click - switching BLE mode to %s\n",
+            printf("[app:usb2ble] Double-click - switching to %s\n",
                    ble_output_get_mode_name(next));
             ble_output_set_mode(next);
-            // Mode change requires different HID descriptor — reboot needed
-            // (Phase 2: persist to flash and reboot here)
             break;
         }
 
