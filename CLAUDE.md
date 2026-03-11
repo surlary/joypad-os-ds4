@@ -45,7 +45,7 @@ make n642usb_kb2040    # N64 → USB HID
 make gc2usb_kb2040     # GameCube → USB HID
 make n642dc_kb2040     # N64 → Dreamcast
 make bt2usb_pico_w     # BT-only → USB HID (Pico W)
-make bt2usb_esp32s3    # BLE-only → USB HID (ESP32-S3, requires ESP-IDF)
+make bt2usb_xiao_esp32s3    # BLE-only → USB HID (ESP32-S3, requires ESP-IDF)
 make bt2usb_seeed_xiao_nrf52840   # BLE-only → USB HID (Seeed XIAO nRF52840, requires NCS)
 make wifi2usb_pico_w   # WiFi → USB HID (Pico W)
 
@@ -58,7 +58,7 @@ make flash              # Flash most recent build
 make flash-usb2pce_kb2040  # Flash specific app
 
 # ESP32-S3 (requires ESP-IDF, see .dev/docs/esp32-port.md)
-make flash-bt2usb_esp32s3  # Flash via esptool
+make flash-bt2usb_xiao_esp32s3  # Flash via esptool
 ```
 
 Output: `releases/joypad_<commit>_<app>_<board>.uf2`
@@ -343,9 +343,9 @@ The `bt2usb` app also runs on ESP32-S3, using BLE (no Classic BT) for controller
 
 ```bash
 # Prerequisites: ESP-IDF v6.0+ installed at ~/esp-idf
-make bt2usb_esp32s3          # Build
-make flash-bt2usb_esp32s3    # Flash via esptool
-make monitor-bt2usb_esp32s3  # UART serial monitor
+make bt2usb_xiao_esp32s3          # Build
+make flash-bt2usb_xiao_esp32s3    # Flash via esptool
+make monitor-bt2usb_xiao_esp32s3  # UART serial monitor
 ```
 
 Key differences from RP2040:

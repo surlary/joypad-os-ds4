@@ -1,4 +1,4 @@
-# ESP32-S3-DevKitC board overrides
+# Seeed XIAO ESP32-S3 board overrides
 # Button: GPIO 0 (BOOT button)
 # No NeoPixel LED
 

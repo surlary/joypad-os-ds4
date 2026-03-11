@@ -227,9 +227,9 @@ help:
 	@echo "  make usb2ble_pico_w    - USB -> BLE Gamepad (Pico W, USB host + BLE peripheral)"
 	@echo "  make usb2ble_pico2_w   - USB -> BLE Gamepad (Pico 2 W, USB host + BLE peripheral)"
 	@echo "  make usb2usb_feather_esp32s3 - USB -> USB HID (Feather ESP32-S3 + MAX3421E FeatherWing)"
-	@echo "  make bt2usb_esp32s3     - Bluetooth -> USB HID (ESP32-S3, requires ESP-IDF)"
-	@echo "  make uf2-bt2usb_esp32s3       - Build + generate .uf2 for drag-and-drop update"
-	@echo "  make flash-uf2-bt2usb_esp32s3 - Build + flash .uf2 via TinyUF2 drive"
+	@echo "  make bt2usb_xiao_esp32s3     - Bluetooth -> USB HID (ESP32-S3, requires ESP-IDF)"
+	@echo "  make uf2-bt2usb_xiao_esp32s3       - Build + generate .uf2 for drag-and-drop update"
+	@echo "  make flash-uf2-bt2usb_xiao_esp32s3 - Build + flash .uf2 via TinyUF2 drive"
 	@echo "  make bt2usb_seeed_xiao_nrf52840    - Bluetooth -> USB HID (Seeed XIAO nRF52840, requires NCS)"
 	@echo "  make flash-bt2usb_seeed_xiao_nrf52840 - Flash Seeed XIAO nRF52840 via UF2 bootloader"
 	@echo "  make bt2usb_feather_nrf52840       - Bluetooth -> USB HID (Adafruit Feather nRF52840, requires NCS)"
@@ -306,7 +306,7 @@ init-esp:
 	@echo "$(YELLOW)Setting up Python environment...$(NC)"
 	@bash -c 'source $(HOME)/esp-idf/export.sh && echo "$(GREEN)  Python env: $$IDF_PYTHON_ENV_PATH$(NC)"'
 	@echo "$(GREEN)✓ ESP-IDF setup complete!$(NC)"
-	@echo "$(GREEN)  You can now run 'make bt2usb_esp32s3'$(NC)"
+	@echo "$(GREEN)  You can now run 'make bt2usb_xiao_esp32s3'$(NC)"
 	@echo ""
 
 # Initialize nRF Connect SDK for nRF52840 builds
@@ -487,22 +487,22 @@ usb2ble_pico2_w:
 	$(call build_app,usb2ble_pico2_w)
 
 # --- ESP32-S3 bt2usb (requires ESP-IDF) ---
-.PHONY: bt2usb_esp32s3
-bt2usb_esp32s3:
-	@echo "$(YELLOW)Building bt2usb for ESP32-S3...$(NC)"
+.PHONY: bt2usb_xiao_esp32s3
+bt2usb_xiao_esp32s3:
+	@echo "$(YELLOW)Building bt2usb for XIAO ESP32-S3...$(NC)"
 	@cd esp && $(MAKE) build
-	@echo "$(GREEN)✓ bt2usb_esp32s3 built successfully$(NC)"
+	@echo "$(GREEN)✓ bt2usb_xiao_esp32s3 built successfully$(NC)"
 	@echo ""
 
-.PHONY: flash-bt2usb_esp32s3
-flash-bt2usb_esp32s3:
-	@echo "$(YELLOW)Flashing bt2usb to ESP32-S3...$(NC)"
+.PHONY: flash-bt2usb_xiao_esp32s3
+flash-bt2usb_xiao_esp32s3:
+	@echo "$(YELLOW)Flashing bt2usb to XIAO ESP32-S3...$(NC)"
 	@cd esp && $(MAKE) flash
-	@echo "$(GREEN)✓ bt2usb_esp32s3 flashed successfully$(NC)"
+	@echo "$(GREEN)✓ bt2usb_xiao_esp32s3 flashed successfully$(NC)"
 	@echo ""
 
-.PHONY: monitor-bt2usb_esp32s3
-monitor-bt2usb_esp32s3:
+.PHONY: monitor-bt2usb_xiao_esp32s3
+monitor-bt2usb_xiao_esp32s3:
 	@cd esp && $(MAKE) monitor
 
 # --- ESP32-S3 bt2usb on Feather ESP32-S3 (requires ESP-IDF) ---
@@ -593,18 +593,18 @@ monitor-usb2usb_feather_esp32s3:
 	@cd esp && $(MAKE) monitor
 
 # --- ESP32-S3 UF2 / Combined targets ---
-.PHONY: uf2-bt2usb_esp32s3
-uf2-bt2usb_esp32s3:
+.PHONY: uf2-bt2usb_xiao_esp32s3
+uf2-bt2usb_xiao_esp32s3:
 	@echo "$(YELLOW)Building bt2usb UF2 for ESP32-S3...$(NC)"
 	@cd esp && $(MAKE) uf2
 	@mkdir -p $(RELEASE_DIR)
 	@cp esp/build/joypad_bt2usb.uf2 \
-	    $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_esp32s3.uf2
-	@echo "$(GREEN)✓ UF2 built: $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_esp32s3.uf2$(NC)"
+	    $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_xiao_esp32s3.uf2
+	@echo "$(GREEN)✓ UF2 built: $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_xiao_esp32s3.uf2$(NC)"
 	@echo ""
 
-.PHONY: flash-uf2-bt2usb_esp32s3
-flash-uf2-bt2usb_esp32s3: uf2-bt2usb_esp32s3
+.PHONY: flash-uf2-bt2usb_xiao_esp32s3
+flash-uf2-bt2usb_xiao_esp32s3: uf2-bt2usb_xiao_esp32s3
 	@if [ ! -d "/Volumes/XIAOS3BOOT" ]; then \
 		echo "$(YELLOW)⚠ /Volumes/XIAOS3BOOT not found$(NC)"; \
 		echo "$(YELLOW)  Put device in TinyUF2 mode:$(NC)"; \
@@ -613,7 +613,7 @@ flash-uf2-bt2usb_esp32s3: uf2-bt2usb_esp32s3
 		exit 1; \
 	fi
 	@echo "$(YELLOW)Flashing UF2 to TinyUF2 drive...$(NC)"
-	@cp $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_esp32s3.uf2 /Volumes/XIAOS3BOOT/
+	@cp $(RELEASE_DIR)/joypad_$(VERSION_ID)_bt2usb_xiao_esp32s3.uf2 /Volumes/XIAOS3BOOT/
 	@echo "$(GREEN)✓ Firmware flashed, device will reboot$(NC)"
 	@echo ""
 
