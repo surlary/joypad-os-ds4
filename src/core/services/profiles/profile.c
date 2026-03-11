@@ -815,19 +815,29 @@ void profile_apply(const profile_t* profile,
     output->r2_analog = r2;
     output->rz_analog = rz;
 
+    // Normalize: digital-only triggers (fight sticks, arcade pads) report
+    // digital L2/R2 with no analog data. Synthesize full analog press so
+    // threshold logic works uniformly across all controller types.
+    if ((input_buttons & JP_BUTTON_L2) && l2 == 0) {
+        l2 = 255;
+        output->l2_analog = 255;
+    }
+    if ((input_buttons & JP_BUTTON_R2) && r2 == 0) {
+        r2 = 255;
+        output->r2_analog = 255;
+    }
+
     // Set L2/R2 digital buttons based on analog threshold (if threshold > 0)
     // When threshold is set, it OVERRIDES input L2/R2 (e.g. DualSense's early digital)
     // Threshold of 0 means passthrough (use input driver's L2/R2 as-is)
     if (profile) {
         if (profile->l2_threshold > 0) {
-            // Clear input L2, use only threshold-based activation
             output->buttons &= ~JP_BUTTON_L2;
             if (l2 >= profile->l2_threshold) {
                 output->buttons |= JP_BUTTON_L2;
             }
         }
         if (profile->r2_threshold > 0) {
-            // Clear input R2, use only threshold-based activation
             output->buttons &= ~JP_BUTTON_R2;
             if (r2 >= profile->r2_threshold) {
                 output->buttons |= JP_BUTTON_R2;
