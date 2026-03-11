@@ -162,7 +162,23 @@ button_event_t button_task(void)
 #ifdef DISABLE_BUTTON_SERVICE
     return BUTTON_EVENT_NONE;
 #endif
-    bool pressed = read_button_debounced();
+
+    // Read button state (throttled for BOOTSEL to limit QSPI disruption)
+    static bool pressed = false;
+#ifdef USE_BOOTSEL_BUTTON
+    // BOOTSEL reads disable interrupts + flash for ~8µs each.
+    // Throttle to 20Hz to avoid thousands of disruptions per second.
+    {
+        static uint32_t last_read = 0;
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - last_read >= 50) {
+            last_read = now;
+            pressed = read_button_debounced();
+        }
+    }
+#else
+    pressed = read_button_debounced();
+#endif
     button_event_t event = BUTTON_EVENT_NONE;
 
     switch (state) {

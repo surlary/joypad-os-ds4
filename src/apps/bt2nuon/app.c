@@ -218,6 +218,9 @@ void app_task(void)
         reset_usb_boot(0, 0);
     }
 
+    // Process button input (BOOTSEL reads are throttled in button_task)
+    button_task();
+
     // BT poll + LED
     bt_task();
     leds_set_connected_devices(btstack_classic_get_connection_count());
