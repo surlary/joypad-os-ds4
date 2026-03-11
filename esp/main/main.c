@@ -1,6 +1,6 @@
-// main.c - ESP32-S3 bt2usb entry point
+// main.c - ESP32-S3 entry point
 //
-// FreeRTOS entry point for the bt2usb app on ESP32-S3.
+// FreeRTOS entry point for Joypad apps on ESP32-S3.
 // BTstack runs in its own FreeRTOS task (created by btstack_run_loop_freertos).
 // Main task handles USB device, app logic, LED, and storage.
 
@@ -10,7 +10,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
-
+#include "driver/uart.h"
 #include "tusb.h"
 #include "esp_private/usb_phy.h"
 #include "platform/platform.h"
@@ -34,8 +34,47 @@ static const InputInterface** inputs = NULL;
 static uint8_t input_count = 0;
 const OutputInterface* active_output = NULL;
 
+// Redirect stdout/stderr to UART1 on header TX/RX pins.
+// ESP-IDF console UART0 custom pin remapping doesn't work reliably on ESP32-S3
+// when USB OTG owns the default UART0 pins, so we use UART1 explicitly.
+#ifdef BOARD_FEATHER_ESP32S3
+static int uart1_write(void* cookie, const char* data, int size)
+{
+    (void)cookie;
+    return uart_write_bytes(UART_NUM_1, data, size);
+}
+
+static void uart1_console_init(void)
+{
+    uart_config_t cfg = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    uart_param_config(UART_NUM_1, &cfg);
+    uart_set_pin(UART_NUM_1, 39, 38, -1, -1);
+    uart_driver_install(UART_NUM_1, 256, 0, 0, NULL, 0);
+
+    // Redirect stdout and stderr to UART1
+    stdout = funopen(NULL, NULL, uart1_write, NULL, NULL);
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    stderr = funopen(NULL, NULL, uart1_write, NULL, NULL);
+    setvbuf(stderr, NULL, _IOLBF, 0);
+
+    // Redirect ESP_LOG to use our new stdout
+    esp_log_set_vprintf(vprintf);
+}
+#endif
+
 void app_main(void)
 {
+#ifdef BOARD_FEATHER_ESP32S3
+    uart1_console_init();
+#endif
+
     // Initialize NVS first (needed for double-tap detection and flash settings)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -49,7 +88,7 @@ void app_main(void)
     extern void platform_check_double_tap(void);
     platform_check_double_tap();
 
-    ESP_LOGI(TAG, "Starting Joypad bt2usb on ESP32-S3...");
+    ESP_LOGI(TAG, "Starting Joypad on ESP32-S3...");
 
     // Initialize shared services
     leds_init();

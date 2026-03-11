@@ -1,12 +1,13 @@
 // bt_transport_esp32.c - ESP32-S3 Bluetooth Transport
 // Implements bt_transport_t using BTstack with ESP32's VHCI (BLE-only)
 //
-// This is for the bt2usb app on ESP32-S3 - receives BLE controllers via
-// built-in BLE radio, outputs as USB HID device.
+// Supports two modes:
+//   - Central (bt2usb): scans/connects BLE controllers via btstack_host
+//   - Peripheral (controller_btusb): advertises as BLE gamepad via ble_output
+// Mode is selected via bt_esp32_set_post_init() callback before bt_init().
 
 #include "bt_transport.h"
-#include "bt/bthid/bthid.h"
-#include "bt/btstack/btstack_host.h"
+#include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -20,6 +21,21 @@
 // BTstack ESP32 port
 extern uint8_t btstack_init(void);
 
+// BTstack HCI (for power on in peripheral mode)
+#include "hci.h"
+
+// ============================================================================
+// POST-INIT CALLBACK (set by app before bt_init)
+// ============================================================================
+
+typedef void (*bt_esp32_post_init_fn)(void);
+static bt_esp32_post_init_fn post_init_callback = NULL;
+
+void bt_esp32_set_post_init(bt_esp32_post_init_fn fn)
+{
+    post_init_callback = fn;
+}
+
 // ============================================================================
 // ESP32 TRANSPORT STATE
 // ============================================================================
@@ -28,15 +44,36 @@ static bt_connection_t esp32_connections[BT_MAX_CONNECTIONS];
 static bool esp32_initialized = false;
 
 // ============================================================================
-// ESP32 TRANSPORT PROCESS (called by btstack_host_process)
+// CENTRAL MODE SUPPORT (bt2usb — btstack_host + bthid)
+// Only linked when btstack_host.c and bthid.c are in the build.
 // ============================================================================
 
-// Override weak function in btstack_host.c to process ESP32 transport
-void btstack_host_transport_process(void)
-{
-    // ESP32 uses FreeRTOS run loop - processing happens automatically
-    // in the BTstack task. No manual polling needed.
-}
+// ---- Central-mode function declarations (weak stubs for peripheral-only builds) ----
+// When btstack_host.c is linked (central mode), these strong symbols override the stubs.
+
+typedef struct {
+    bool active;
+    uint8_t bd_addr[6];
+    char name[48];
+    uint8_t class_of_device[3];
+    uint16_t vendor_id;
+    uint16_t product_id;
+    bool hid_ready;
+    bool is_ble;
+} btstack_classic_conn_info_t;
+
+__attribute__((weak)) void btstack_host_init_hid_handlers(void) {}
+__attribute__((weak)) void btstack_host_process(void) {}
+__attribute__((weak)) void bthid_task(void) {}
+__attribute__((weak)) void btstack_host_power_on(void) {}
+__attribute__((weak)) bool btstack_host_is_powered_on(void) { return false; }
+__attribute__((weak)) void btstack_host_start_scan(void) {}
+__attribute__((weak)) void btstack_host_stop_scan(void) {}
+__attribute__((weak)) bool btstack_host_is_scanning(void) { return false; }
+__attribute__((weak)) uint8_t btstack_classic_get_connection_count(void) { return 0; }
+__attribute__((weak)) bool btstack_classic_get_connection(uint8_t idx, btstack_classic_conn_info_t *info) { (void)idx; (void)info; return false; }
+__attribute__((weak)) bool btstack_classic_send_set_report_type(uint8_t idx, uint8_t type, uint8_t id, const uint8_t *data, uint16_t len) { (void)idx; (void)type; (void)id; (void)data; (void)len; return false; }
+__attribute__((weak)) bool btstack_classic_send_report(uint8_t idx, uint8_t id, const uint8_t *data, uint16_t len) { (void)idx; (void)id; (void)data; (void)len; return false; }
 
 // ============================================================================
 // TRANSPORT IMPLEMENTATION
@@ -44,6 +81,7 @@ void btstack_host_transport_process(void)
 
 // Periodic timer: runs btstack_host_process() and bthid_task() inside the
 // BTstack run loop context so all BTstack API calls happen in one thread.
+// In peripheral mode, the timer still runs but the weak stubs are no-ops.
 static btstack_timer_source_t process_timer;
 #define PROCESS_INTERVAL_MS 10
 
@@ -72,8 +110,14 @@ static void btstack_run_loop_task(void *arg)
     }
     printf("[BT_ESP32] BTstack core initialized\n");
 
-    // 2. Register our HID host handlers (before run loop processes events)
-    btstack_host_init_hid_handlers();
+    // 2. Post-init: app-provided callback (peripheral) or default HID host (central)
+    if (post_init_callback) {
+        printf("[BT_ESP32] Running app post-init callback (peripheral mode)\n");
+        post_init_callback();
+    } else {
+        printf("[BT_ESP32] Initializing HID host handlers (central mode)\n");
+        btstack_host_init_hid_handlers();
+    }
 
     // 3. Start periodic process timer (runs host_process + bthid_task in this context)
     btstack_run_loop_set_timer_handler(&process_timer, process_timer_handler);
@@ -81,7 +125,13 @@ static void btstack_run_loop_task(void *arg)
     btstack_run_loop_add_timer(&process_timer);
 
     // 4. Power on Bluetooth (triggers HCI state machine)
-    btstack_host_power_on();
+    if (post_init_callback) {
+        // Peripheral mode: call hci_power_control directly (no btstack_host)
+        printf("[BT_ESP32] Powering on BT controller (peripheral mode)\n");
+        hci_power_control(HCI_POWER_ON);
+    } else {
+        btstack_host_power_on();
+    }
 
     esp32_initialized = true;
     printf("[BT_ESP32] Entering BTstack run loop\n");
@@ -111,6 +161,11 @@ static void esp32_transport_task(void)
 
 static bool esp32_transport_is_ready(void)
 {
+    // In peripheral mode (post_init_callback set), esp32_initialized is sufficient.
+    // In central mode, also check btstack_host_is_powered_on().
+    if (post_init_callback) {
+        return esp32_initialized;
+    }
     return esp32_initialized && btstack_host_is_powered_on();
 }
 

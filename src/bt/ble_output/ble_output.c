@@ -261,6 +261,11 @@ typedef enum {
 static hci_con_handle_t con_handle = HCI_CON_HANDLE_INVALID;
 static bool ble_connected = false;
 
+bool ble_output_is_connected(void)
+{
+    return ble_connected;
+}
+
 // Pending reports (flow-controlled — only one at a time)
 static pending_report_type_t pending_type = PENDING_NONE;
 static ble_gamepad_report_t pending_gamepad;
@@ -520,6 +525,10 @@ void ble_output_late_init(void)
 {
     printf("[ble_output] Setting up BLE GATT services (mode: %s)\n",
            ble_output_get_mode_name(current_mode));
+
+    // Initialize L2CAP and Security Manager (required before ATT/GATT setup)
+    l2cap_init();
+    sm_init();
 
     // Setup ATT server with mode-appropriate GATT profile
     const uint8_t *gatt_db = (current_mode == BLE_MODE_XBOX)

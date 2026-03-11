@@ -1,0 +1,20 @@
+# Adafruit Feather ESP32-S3 board overrides
+# Button: GPIO 0 (BOOT button)
+# NeoPixel: GPIO 33 (active high, no level shift)
+# Status LED: GPIO 13
+
+# 4MB flash (same as default, but explicit for this board)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Custom partition table for TinyUF2
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_uf2.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_uf2.csv"
+
+# Flash tool: don't reset before flash (device enters bootloader via CDC command)
+CONFIG_ESPTOOLPY_BEFORE_NORESET=y
+
+# Console: stdout redirected to UART1 on GPIO39/38 in app code (uart1_console_init).
+# ESP-IDF's UART0 custom pin remapping doesn't work when USB OTG is active.
+# Disable secondary USB Serial/JTAG console to prevent stdout stalling.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

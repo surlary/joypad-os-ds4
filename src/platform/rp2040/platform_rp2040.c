@@ -24,6 +24,11 @@ void platform_sleep_ms(uint32_t ms)
     sleep_ms(ms);
 }
 
+void platform_sleep_us(uint32_t us)
+{
+    busy_wait_us(us);
+}
+
 void platform_get_serial(char* buf, size_t len)
 {
     pico_get_unique_board_id_string(buf, len);

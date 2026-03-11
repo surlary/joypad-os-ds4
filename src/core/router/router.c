@@ -736,7 +736,21 @@ void router_submit_input(const input_event_t* event) {
             break;
 
         case ROUTING_MODE_MERGE:
-            router_merge_mode(event, output);
+            // Route to all unique output targets from active routes
+            for (uint8_t i = 0; i < MAX_ROUTES; i++) {
+                if (!routing_table[i].active) continue;
+                // Deduplicate: skip if a previous route already targeted this output
+                bool dup = false;
+                for (uint8_t j = 0; j < i; j++) {
+                    if (routing_table[j].active && routing_table[j].output == routing_table[i].output) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) {
+                    router_merge_mode(event, routing_table[i].output);
+                }
+            }
             break;
 
         case ROUTING_MODE_BROADCAST:

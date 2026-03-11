@@ -26,6 +26,9 @@ uint32_t platform_time_us(void);
 // Sleep for specified milliseconds
 void platform_sleep_ms(uint32_t ms);
 
+// Busy-wait for specified microseconds (does not yield to scheduler)
+void platform_sleep_us(uint32_t us);
+
 // Get unique board serial string (hex)
 void platform_get_serial(char* buf, size_t len);
 

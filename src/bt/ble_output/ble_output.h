@@ -31,6 +31,9 @@ void ble_output_init(void);
 void ble_output_late_init(void);
 void ble_output_task(void);
 
+// Connection state
+bool ble_output_is_connected(void);
+
 // Mode selection
 ble_output_mode_t ble_output_get_mode(void);
 void ble_output_set_mode(ble_output_mode_t mode);

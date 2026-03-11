@@ -2,8 +2,10 @@
 // Manages the active transport and provides weak callback defaults
 
 #include "bt_transport.h"
-#include "bt/bthid/bthid_registry.h"
 #include <stdio.h>
+
+// Weak so peripheral-only builds (no bthid) don't need the symbol
+__attribute__((weak)) void bthid_registry_init(void) {}
 
 // ============================================================================
 // ACTIVE TRANSPORT

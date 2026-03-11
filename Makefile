@@ -98,6 +98,7 @@ CONSOLE_controller_fisherprice_analog := joypad_controller_fisherprice_analog
 CONSOLE_controller_alpakka := joypad_controller_alpakka
 CONSOLE_controller_macropad := joypad_controller_macropad
 
+
 # App definitions: APP_name = board target output_name input output
 # Naming convention: <app>_<board> for all apps
 APP_usb2pce_kb2040 := kb2040 pce usb2pce_kb2040 USB/BT PCEngine
@@ -149,6 +150,7 @@ APP_controller_fisherprice_kb2040 := kb2040 controller_fisherprice controller_fi
 APP_controller_fisherprice_analog_kb2040 := kb2040 controller_fisherprice_analog controller_fisherprice_analog_kb2040 GPIO/ADC USB
 APP_controller_alpakka_pico := pico controller_alpakka controller_alpakka_pico GPIO/I2C USB
 APP_controller_macropad := macropad controller_macropad controller_macropad GPIO USB
+
 
 # All apps (note: controller_macropad not included - build explicitly with 'make controller_macropad')
 # Note: usb2loopy_kb2040, snes23do_rp2040zero excluded until more mature
@@ -244,6 +246,7 @@ help:
 	@echo "  make controller_fisherprice_kb2040 - GPIO -> USB HID (RP2040-Zero)"
 	@echo "  make controller_alpakka_pico - GPIO/I2C -> USB HID (Pico)"
 	@echo "  make controller_macropad - 12 keys -> USB HID (MacroPad RP2040)"
+
 	@echo "  make nes2usb_kb2040     - NES -> USB HID (KB2040)"
 	@echo "  make nes2usb_pico_w     - NES -> USB HID (Pico W)"
 	@echo ""
@@ -499,6 +502,36 @@ flash-bt2usb_esp32s3:
 monitor-bt2usb_esp32s3:
 	@cd esp && $(MAKE) monitor
 
+
+# --- ESP32-S3 controller_btusb (requires ESP-IDF) ---
+.PHONY: controller_btusb_feather_esp32s3
+controller_btusb_feather_esp32s3:
+	@echo "$(YELLOW)Building controller_btusb for Feather ESP32-S3...$(NC)"
+	@cd esp && $(MAKE) build CONFIG_APP=controller_btusb BOARD=feather_esp32s3
+	@echo "$(GREEN)✓ controller_btusb_feather_esp32s3 built successfully$(NC)"
+	@echo ""
+
+.PHONY: uf2-controller_btusb_feather_esp32s3
+uf2-controller_btusb_feather_esp32s3:
+	@echo "$(YELLOW)Building controller_btusb UF2 for Feather ESP32-S3...$(NC)"
+	@cd esp && $(MAKE) uf2 CONFIG_APP=controller_btusb BOARD=feather_esp32s3
+	@mkdir -p $(RELEASE_DIR)
+	@cp esp/build/joypad_controller_btusb.uf2 \
+	    $(RELEASE_DIR)/joypad_$(VERSION_ID)_controller_btusb_feather_esp32s3.uf2
+	@echo "$(GREEN)✓ UF2 built: $(RELEASE_DIR)/joypad_$(VERSION_ID)_controller_btusb_feather_esp32s3.uf2$(NC)"
+	@echo ""
+
+.PHONY: flash-controller_btusb_feather_esp32s3
+flash-controller_btusb_feather_esp32s3:
+	@echo "$(YELLOW)Flashing controller_btusb to Feather ESP32-S3...$(NC)"
+	@cd esp && $(MAKE) flash CONFIG_APP=controller_btusb BOARD=feather_esp32s3
+	@echo "$(GREEN)✓ controller_btusb_feather_esp32s3 flashed successfully$(NC)"
+	@echo ""
+
+.PHONY: monitor-controller_btusb_feather_esp32s3
+monitor-controller_btusb_feather_esp32s3:
+	@cd esp && $(MAKE) monitor
+
 # --- ESP32-S3 UF2 / Combined targets ---
 .PHONY: uf2-bt2usb_esp32s3
 uf2-bt2usb_esp32s3:
@@ -651,6 +684,7 @@ controller_alpakka_pico:
 .PHONY: controller_macropad
 controller_macropad:
 	$(call build_app,controller_macropad)
+
 
 .PHONY: nes2usb_kb2040
 nes2usb_kb2040:
@@ -957,6 +991,7 @@ flash-controller_alpakka_pico:
 flash-controller_macropad:
 	@$(MAKE) --no-print-directory _flash_app APP_NAME=controller_macropad
 
+
 .PHONY: flash-nes2usb_kb2040
 flash-nes2usb_kb2040:
 	@$(MAKE) --no-print-directory _flash_app APP_NAME=nes2usb_kb2040
@@ -997,6 +1032,12 @@ clean:
 	@rm -rf src/build
 	@rm -rf $(RELEASE_DIR)
 	@echo "$(GREEN)✓ Clean complete$(NC)"
+	@echo ""
+
+clean-esp:
+	@echo "$(YELLOW)Cleaning ESP32 build artifacts...$(NC)"
+	@rm -rf esp/build esp/sdkconfig
+	@echo "$(GREEN)✓ ESP32 clean complete$(NC)"
 	@echo ""
 
 # Full clean - reset to fresh clone state

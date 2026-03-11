@@ -87,7 +87,10 @@ static char usb_serial_str[USB_SERIAL_LEN + 1];
 
 // Current output mode (persisted to flash)
 #ifdef CONFIG_USB2BLE
-static usb_output_mode_t output_mode = USB_OUTPUT_MODE_CDC;
+#ifndef USBD_DEFAULT_MODE
+#define USBD_DEFAULT_MODE USB_OUTPUT_MODE_CDC
+#endif
+static usb_output_mode_t output_mode = USBD_DEFAULT_MODE;
 #else
 static usb_output_mode_t output_mode = USB_OUTPUT_MODE_SINPUT;
 #endif

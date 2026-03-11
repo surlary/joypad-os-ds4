@@ -17,7 +17,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#define DBL_TAP_DELAY_MS    500
+#define DBL_TAP_DELAY_MS    1000
 
 uint32_t platform_time_ms(void)
 {
@@ -32,6 +32,11 @@ uint32_t platform_time_us(void)
 void platform_sleep_ms(uint32_t ms)
 {
     vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void platform_sleep_us(uint32_t us)
+{
+    esp_rom_delay_us(us);
 }
 
 void platform_get_serial(char* buf, size_t len)
@@ -119,8 +124,6 @@ void platform_reboot_bootloader(void)
 {
     // TinyUF2's custom bootloader checks RTC_CNTL_STORE6_REG for hint 0x11F2
     // on SW reset, and boots factory (TinyUF2) instead of the app.
-    // Format: bit31 set + hint duplicated in bits[30:16] and bits[14:0].
-    // Non-persistent — next normal boot reads otadata and boots ota_0.
     printf("[platform] Rebooting into TinyUF2...\n");
     REG_WRITE(RTC_CNTL_STORE6_REG, 0x80000000 | (0x11F2 << 16) | 0x11F2);
     esp_restart();
