@@ -68,6 +68,8 @@ class JoypadConfigApp {
         this.connectPrompt = document.getElementById('connectPrompt');
         this.mainContent = document.getElementById('mainContent');
         this.modeSelect = document.getElementById('modeSelect');
+        this.bleModeSelect = document.getElementById('bleModeSelect');
+        this.bleModeCard = document.getElementById('bleModeCard');
         this.wiimoteOrientSelect = document.getElementById('wiimoteOrientSelect');
         this.streamBtn = document.getElementById('streamBtn');
         this.logEl = document.getElementById('log');
@@ -96,6 +98,7 @@ class JoypadConfigApp {
         this.connectBtn.addEventListener('click', () => this.toggleConnection());
         this.connectBtn2.addEventListener('click', () => this.connect());
         this.modeSelect.addEventListener('change', (e) => this.setMode(e.target.value));
+        this.bleModeSelect.addEventListener('change', (e) => this.setBleMode(e.target.value));
         this.wiimoteOrientSelect.addEventListener('change', (e) => this.setWiimoteOrient(e.target.value));
         this.streamBtn.addEventListener('click', () => this.toggleStreaming());
 
@@ -197,6 +200,7 @@ class JoypadConfigApp {
             // Load device info
             await this.loadDeviceInfo();
             await this.loadModes();
+            await this.loadBleModes();
             await this.loadProfiles();
             await this.loadWiimoteOrient();
 
@@ -259,6 +263,43 @@ class JoypadConfigApp {
             this.log(`Loaded ${result.modes.length} modes, current: ${result.current}`);
         } catch (e) {
             this.log(`Failed to load modes: ${e.message}`, 'error');
+        }
+    }
+
+    async loadBleModes() {
+        try {
+            const result = await this.protocol.listBleModes();
+            this.bleModeSelect.innerHTML = '';
+
+            for (const mode of result.modes) {
+                const option = document.createElement('option');
+                option.value = mode.id;
+                option.textContent = mode.name;
+                option.selected = mode.id === result.current;
+                this.bleModeSelect.appendChild(option);
+            }
+
+            // Show the BLE mode card (device supports BLE output)
+            this.bleModeCard.style.display = '';
+            this.log(`Loaded ${result.modes.length} BLE modes, current: ${result.current}`);
+        } catch (e) {
+            // Device doesn't support BLE output modes — hide the card
+            this.bleModeCard.style.display = 'none';
+        }
+    }
+
+    async setBleMode(modeId) {
+        try {
+            this.log(`Setting BLE mode to ${modeId}...`);
+            const result = await this.protocol.setBleMode(parseInt(modeId));
+            this.log(`BLE mode set to ${result.name}`, 'success');
+
+            if (result.reboot) {
+                this.log('Device will reboot...', 'warning');
+                this.updateConnectionUI(false);
+            }
+        } catch (e) {
+            this.log(`Failed to set BLE mode: ${e.message}`, 'error');
         }
     }
 

@@ -26,6 +26,11 @@
 #include "bt/bthid/devices/vendors/nintendo/wiimote_bt.h"
 #endif
 
+// Optional BLE output support
+#if REQUIRE_BLE_OUTPUT
+#include "bt/ble_output/ble_output.h"
+#endif
+
 // ============================================================================
 // STATE
 // ============================================================================
@@ -324,6 +329,77 @@ static void cmd_mode_list(const char* json)
     snprintf(response_buf + pos, sizeof(response_buf) - pos, "]}");
     send_json(response_buf);
 }
+
+// ============================================================================
+// BLE OUTPUT MODE COMMANDS
+// ============================================================================
+
+#if REQUIRE_BLE_OUTPUT
+
+static void cmd_ble_mode_get(const char* json)
+{
+    (void)json;
+    ble_output_mode_t mode = ble_output_get_mode();
+    snprintf(response_buf, sizeof(response_buf),
+             "{\"mode\":%d,\"name\":\"%s\"}",
+             (int)mode, ble_output_get_mode_name(mode));
+    send_json(response_buf);
+}
+
+static void cmd_ble_mode_set(const char* json)
+{
+    int mode;
+    if (!json_get_int(json, "mode", &mode)) {
+        send_error("missing mode");
+        return;
+    }
+
+    if (mode < 0 || mode >= BLE_MODE_COUNT) {
+        send_error("invalid mode");
+        return;
+    }
+
+    ble_output_mode_t current = ble_output_get_mode();
+    if ((ble_output_mode_t)mode == current) {
+        snprintf(response_buf, sizeof(response_buf),
+                 "{\"mode\":%d,\"name\":\"%s\",\"reboot\":false}",
+                 mode, ble_output_get_mode_name((ble_output_mode_t)mode));
+        send_json(response_buf);
+        return;
+    }
+
+    snprintf(response_buf, sizeof(response_buf),
+             "{\"mode\":%d,\"name\":\"%s\",\"reboot\":true}",
+             mode, ble_output_get_mode_name((ble_output_mode_t)mode));
+    send_json(response_buf);
+
+    // Flush then switch mode (saves to flash and reboots)
+    tud_task();
+    platform_sleep_ms(50);
+    tud_task();
+    ble_output_set_mode((ble_output_mode_t)mode);
+}
+
+static void cmd_ble_mode_list(const char* json)
+{
+    (void)json;
+    ble_output_mode_t current = ble_output_get_mode();
+
+    int pos = snprintf(response_buf, sizeof(response_buf),
+                       "{\"current\":%d,\"modes\":[", (int)current);
+
+    bool first = true;
+    for (int i = 0; i < BLE_MODE_COUNT && pos < (int)sizeof(response_buf) - 50; i++) {
+        if (!first) pos += snprintf(response_buf + pos, sizeof(response_buf) - pos, ",");
+        first = false;
+        pos += snprintf(response_buf + pos, sizeof(response_buf) - pos,
+                        "{\"id\":%d,\"name\":\"%s\"}", i, ble_output_get_mode_name(i));
+    }
+    snprintf(response_buf + pos, sizeof(response_buf) - pos, "]}");
+    send_json(response_buf);
+}
+
+#endif // REQUIRE_BLE_OUTPUT
 
 // ============================================================================
 // UNIFIED PROFILE COMMANDS
@@ -1306,6 +1382,11 @@ static const cmd_entry_t commands[] = {
     {"BT.BONDS.CLEAR", cmd_bt_bonds_clear},
     {"WIIMOTE.ORIENT.GET", cmd_wiimote_orient_get},
     {"WIIMOTE.ORIENT.SET", cmd_wiimote_orient_set},
+#endif
+#if REQUIRE_BLE_OUTPUT
+    {"BLE.MODE.GET", cmd_ble_mode_get},
+    {"BLE.MODE.SET", cmd_ble_mode_set},
+    {"BLE.MODE.LIST", cmd_ble_mode_list},
 #endif
     {NULL, NULL}
 };

@@ -359,6 +359,19 @@ class CDCProtocol {
         return this.sendCommand('MODE.LIST');
     }
 
+    // BLE Output Mode methods
+    async getBleMode() {
+        return this.sendCommand('BLE.MODE.GET');
+    }
+
+    async setBleMode(mode) {
+        return this.sendCommand('BLE.MODE.SET', { mode });
+    }
+
+    async listBleModes() {
+        return this.sendCommand('BLE.MODE.LIST');
+    }
+
     // Unified Profile methods (supports both built-in and custom profiles)
     async listProfiles() {
         return this.sendCommand('PROFILE.LIST');
