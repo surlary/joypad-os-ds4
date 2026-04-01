@@ -125,19 +125,16 @@ static bool ps4_mode_send_report(uint8_t player_index,
     if (buttons & JP_BUTTON_L1) byte6 |= 0x01;  // L1
     if (buttons & JP_BUTTON_R1) byte6 |= 0x02;  // R1
     
-    // SF6 / Fighting Games Optimization: Binary Triggers
-    // If digital bit is set OR analog > 10, force both digital bit and 255 analog.
-    uint8_t l2_val = 0;
-    if ((buttons & JP_BUTTON_L2) || profile_out->l2_analog > 10) {
-        byte6 |= 0x04; // L2 Digital
-        l2_val = 0xFF; // L2 Analog
-    }
-    
-    uint8_t r2_val = 0;
-    if ((buttons & JP_BUTTON_R2) || profile_out->r2_analog > 10) {
-        byte6 |= 0x08; // R2 Digital
-        r2_val = 0xFF; // R2 Analog
-    }
+    // Hybrid Trigger Logic:
+    // 1. Digital bits (0x04/0x08) are flipped if ANY pressure is detected (> 0).
+    //    This ensures SF6 and other fighting games register the button press immediately.
+    // 2. Analog values (Byte 8/9) are passed through normally.
+    //    This ensures FC26 and racing games maintain full analog sensitivity.
+    uint8_t l2_val = profile_out->l2_analog;
+    uint8_t r2_val = profile_out->r2_analog;
+
+    if (l2_val > 0 || (buttons & JP_BUTTON_L2)) byte6 |= 0x04; // L2 Digital
+    if (r2_val > 0 || (buttons & JP_BUTTON_R2)) byte6 |= 0x08; // R2 Digital
 
     if (buttons & JP_BUTTON_S1) byte6 |= 0x10;  // Share
     if (buttons & JP_BUTTON_S2) byte6 |= 0x20;  // Options
@@ -152,7 +149,7 @@ static bool ps4_mode_send_report(uint8_t player_index,
     byte7 |= ((ps4_report_counter++ & 0x3F) << 2);       // Counter in bits 2-7
     ps4_report_buffer[7] = byte7;
 
-    // Bytes 8-9: Analog triggers (already calculated binary values)
+    // Bytes 8-9: Analog triggers (passing through real values)
     ps4_report_buffer[8] = l2_val;
     ps4_report_buffer[9] = r2_val;
 
