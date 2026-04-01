@@ -17,12 +17,12 @@
 // USB IDENTIFIERS
 // ============================================================================
 
-// Using Sony DualShock 4 v2 for 100% precision and compatibility
-#define PS4_VID             0x054C  // Sony
-#define PS4_PID             0x09CC  // DualShock 4 v2
+// Using Razer Panthera - known PS4-compatible fightstick
+#define PS4_VID             0x1532  // Razer
+#define PS4_PID             0x0401  // Panthera
 #define PS4_BCD             0x0100  // v1.00
-#define PS4_MANUFACTURER    "Sony Interactive Entertainment"
-#define PS4_PRODUCT         "Wireless Controller"
+#define PS4_MANUFACTURER    "Razer"
+#define PS4_PRODUCT         "Panthera"
 
 #define PS4_ENDPOINT_SIZE   64
 
@@ -214,7 +214,7 @@ static const tusb_desc_device_t ps4_device_descriptor = {
     .bcdDevice          = PS4_BCD,
     .iManufacturer      = 0x01,
     .iProduct           = 0x02,
-    .iSerialNumber      = 0x03,  // Enable Serial Number (mandatory for DS4)
+    .iSerialNumber      = 0x00,  // Disable Serial Number
     .bNumConfigurations = 0x01
 };
 
