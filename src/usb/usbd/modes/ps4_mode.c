@@ -26,6 +26,7 @@ static uint8_t ps4_report_buffer[64];
 static ps4_out_report_t ps4_output;
 static bool ps4_output_available = false;
 static uint8_t ps4_report_counter = 0;
+static uint16_t ps4_timestamp = 0;
 
 
 // ============================================================================
@@ -41,13 +42,19 @@ static void ps4_mode_init(void)
     ps4_report_buffer[2] = 0x80;  // LY center
     ps4_report_buffer[3] = 0x80;  // RX center
     ps4_report_buffer[4] = 0x80;  // RY center
-    ps4_report_buffer[5] = PS4_HAT_NOTHING;  // D-pad neutral (0x0F), no buttons
+    ps4_report_buffer[5] = PS4_HAT_NOTHING;  // D-pad neutral (0x08), no buttons
     // Bytes 6-9: buttons and triggers already 0
-    // Set touchpad fingers to unpressed
+    // Set accelerometer rest state (1G on Z-axis seen in Brook as 0x2060)
+    ps4_report_buffer[21] = 0x60;
+    ps4_report_buffer[22] = 0x20;
+    // Set power level (0x1b = full battery + charging, matches Brook)
+    ps4_report_buffer[30] = 0x1b;
+    // Set touchpad fingers to unpressed (Bit 7 of bytes 35 and 39, matches Brook)
     ps4_report_buffer[35] = 0x80;  // touchpad p1 unpressed
     ps4_report_buffer[39] = 0x80;  // touchpad p2 unpressed
     memset(&ps4_output, 0, sizeof(ps4_out_report_t));
     ps4_report_counter = 0;
+    ps4_timestamp = 0;
 }
 
 static bool ps4_mode_is_ready(void)
@@ -69,7 +76,8 @@ static bool ps4_mode_is_ready(void)
 //   Byte 7:    PS (bit 0) + Touchpad (bit 1) + Counter (bits 2-7)
 //   Byte 8:    Left trigger analog (0x00-0xFF)
 //   Byte 9:    Right trigger analog (0x00-0xFF)
-//   Bytes 10-63: Timestamp, sensor data, touchpad data, padding
+//   Bytes 10-11: Axis timing (timestamp)
+//   Bytes 12-63: Sensor data, touchpad data, padding
 static bool ps4_mode_send_report(uint8_t player_index,
                                   const input_event_t* event,
                                   const profile_output_t* profile_out,
@@ -81,11 +89,12 @@ static bool ps4_mode_send_report(uint8_t player_index,
     // Byte 0: Report ID
     ps4_report_buffer[0] = 0x01;
 
-    // Bytes 1-4: Analog sticks (HID convention: 0=up, 255=down - no inversion needed)
-    ps4_report_buffer[1] = profile_out->left_x;          // LX
-    ps4_report_buffer[2] = profile_out->left_y;          // LY
-    ps4_report_buffer[3] = profile_out->right_x;         // RX
-    ps4_report_buffer[4] = profile_out->right_y;         // RY
+    // Bytes 1-4: Analog sticks (HID convention: 0=up, 255=down)
+    // Applying a tiny deadzone to ensure absolute 128 (0x80) when centered
+    ps4_report_buffer[1] = (profile_out->left_x > 125 && profile_out->left_x < 131) ? 128 : profile_out->left_x;
+    ps4_report_buffer[2] = (profile_out->left_y > 125 && profile_out->left_y < 131) ? 128 : profile_out->left_y;
+    ps4_report_buffer[3] = (profile_out->right_x > 125 && profile_out->right_x < 131) ? 128 : profile_out->right_x;
+    ps4_report_buffer[4] = (profile_out->right_y > 125 && profile_out->right_y < 131) ? 128 : profile_out->right_y;
 
     // Byte 5: D-pad (bits 0-3) + face buttons (bits 4-7)
     uint8_t up = (buttons & JP_BUTTON_DU) ? 1 : 0;
@@ -131,12 +140,25 @@ static bool ps4_mode_send_report(uint8_t player_index,
     byte7 |= ((ps4_report_counter++ & 0x3F) << 2);       // Counter in bits 2-7
     ps4_report_buffer[7] = byte7;
 
-    // Bytes 8-9: Analog triggers
-    ps4_report_buffer[8] = profile_out->l2_analog;  // Left trigger
-    ps4_report_buffer[9] = profile_out->r2_analog;  // Right trigger
+    // Bytes 8-9: Analog triggers with safety deadzone
+    // If analog is very low, force to 0 to ensure digital button clarity
+    ps4_report_buffer[8] = (profile_out->l2_analog < 5) ? 0 : profile_out->l2_analog;
+    ps4_report_buffer[9] = (profile_out->r2_analog < 5) ? 0 : profile_out->r2_analog;
 
-    // Bytes 10-11: Timestamp (we can just increment)
-    // Bytes 12-63: Leave as initialized (sensor data, touchpad, padding)
+    // Bytes 10-11: Timestamp (axis timing)
+    // Real DS4 increments by ~188 ticks per 1ms report
+    ps4_timestamp += 188; 
+    ps4_report_buffer[10] = ps4_timestamp & 0xFF;
+    ps4_report_buffer[11] = (ps4_timestamp >> 8) & 0xFF;
+
+    // Byte 30: Power level (set to full battery + charging if zero)
+    if (ps4_report_buffer[30] == 0) ps4_report_buffer[30] = 0x1b;
+
+    // Byte 35 & 39: Ensure touchpad unpressed bits are set if not active
+    if (!(buttons & JP_BUTTON_A2)) {
+        ps4_report_buffer[35] |= 0x80;
+        ps4_report_buffer[39] |= 0x80;
+    }
 
     // Send with report_id=0x01, letting TinyUSB prepend it
     // Skip byte 0 of buffer (our report_id) and send 63 bytes of data

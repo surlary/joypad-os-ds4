@@ -38,7 +38,7 @@
 #define PS4_HAT_DOWN_LEFT   0x05
 #define PS4_HAT_LEFT        0x06
 #define PS4_HAT_UP_LEFT     0x07
-#define PS4_HAT_NOTHING     0x0F  // Null state - PS4 requires 0x0F, not 0x08
+#define PS4_HAT_NOTHING     0x08  // Null state - Brook and many DS4 use 0x08 instead of 0x0F
 
 // ============================================================================
 // BUTTON MASKS
