@@ -1172,19 +1172,27 @@ static bool usbd_send_ps4_report(uint8_t player_index)
     if (!mode || !mode->send_report) return false;
     if (mode->is_ready && !mode->is_ready()) return false;
 
-    // Check for pending event
-    if (player_index >= USB_MAX_PLAYERS || !pending_flags[player_index]) {
+    if (player_index >= USB_MAX_PLAYERS) {
         return false;
     }
 
+    // Static cache for processed output to avoid redundant profile application
+    // when sending continuous reports for stability.
+    static profile_output_t cached_profile_out[USB_MAX_PLAYERS];
+    static uint32_t cached_buttons[USB_MAX_PLAYERS];
+    static bool cache_valid[USB_MAX_PLAYERS] = {false};
+
     const input_event_t* event = &pending_events[player_index];
-    pending_flags[player_index] = false;
 
-    // Apply profile
-    profile_output_t profile_out;
-    uint32_t processed_buttons = apply_usbd_profile(event, &profile_out);
+    // Only re-apply profile if input actually changed or cache is empty
+    if (pending_flags[player_index] || !cache_valid[player_index]) {
+        cached_buttons[player_index] = apply_usbd_profile(event, &cached_profile_out[player_index]);
+        pending_flags[player_index] = false;
+        cache_valid[player_index] = true;
+    }
 
-    return mode->send_report(player_index, event, &profile_out, processed_buttons);
+    // Always delegate to mode implementation to keep counter/timestamp moving
+    return mode->send_report(player_index, event, &cached_profile_out[player_index], cached_buttons[player_index]);
 }
 
 // Send Xbox One report - delegates to mode interface
