@@ -76,7 +76,7 @@ Use any USB or Bluetooth controller on retro consoles:
 
 | Console | Highlights | Docs |
 |---------|-----------|------|
-| **PlayStation 4** | **Local RSA Auth**, Passthrough, Rumble | [Guide](docs/protocols/PS4_DS4_EMULATION.md) |
+| **PlayStation 4** | **Local RSA Auth**, Passthrough, Rumble | [Guide](docs/architecture/ps4_auth.md) |
 | **PCEngine / TurboGrafx-16** | Multitap (5 players), mouse, 2/3/6-button | [Guide](docs/adapters/pcengine.md) |
 | **GameCube / Wii** | Profiles, rumble, keyboard mode | [Guide](docs/adapters/gamecube.md) |
 | **Sega Dreamcast** | Rumble, analog triggers, 4 players | [Guide](docs/adapters/dreamcast.md) |
