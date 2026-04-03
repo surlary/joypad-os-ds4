@@ -43,6 +43,10 @@
 #ifndef DISABLE_USB_HOST
 #include "usb/usbh/hid/devices/vendors/sony/sony_ds4.h"
 #endif
+#ifdef ENABLE_PS4_LOCAL_AUTH
+#include "usb/usbd/modes/ps4_local_auth.h"
+#include "core/services/storage/ps4_event_log.h"
+#endif
 #include "tusb.h"
 #include "device/usbd_pvt.h"
 #include "platform/platform.h"
@@ -85,15 +89,15 @@ static bool pending_flags[USB_MAX_PLAYERS] = {false};
 #define USB_SERIAL_LEN 12
 static char usb_serial_str[USB_SERIAL_LEN + 1];
 
-// Current output mode (persisted to flash)
-#if defined(CONFIG_USB2BLE) || defined(CONFIG_NGC)
+// Current output mode — override per-app via -DUSBD_DEFAULT_MODE=USB_OUTPUT_MODE_xxx
 #ifndef USBD_DEFAULT_MODE
-#define USBD_DEFAULT_MODE USB_OUTPUT_MODE_CDC
+#  if defined(CONFIG_USB2BLE) || defined(CONFIG_NGC)
+#    define USBD_DEFAULT_MODE USB_OUTPUT_MODE_CDC
+#  else
+#    define USBD_DEFAULT_MODE USB_OUTPUT_MODE_SINPUT
+#  endif
 #endif
 static usb_output_mode_t output_mode = USBD_DEFAULT_MODE;
-#else
-static usb_output_mode_t output_mode = USB_OUTPUT_MODE_SINPUT;
-#endif
 
 // Forward declaration (defined in CONFIGURATION DESCRIPTOR section)
 static void build_config_descriptors(void);
@@ -586,6 +590,12 @@ void usbd_init(void)
 
     // Initialize and load settings from flash
     flash_init();
+#ifdef ENABLE_PS4_LOCAL_AUTH
+    // Initialize flash event log (scan for next empty slot)
+    ps4_event_log_init();
+    // Load PS4 auth key material from flash (requires flash_init to have run first)
+    ps4_local_auth_init();
+#endif
     // Load saved mode from flash (runtime_settings holds the canonical state)
     flash_t* settings = flash_get_settings();
     if (settings) {
@@ -843,12 +853,16 @@ void usbd_task(void)
             break;
         }
 
-        case USB_OUTPUT_MODE_PS4:
-            // PS4 mode: send HID report (no CDC)
+        case USB_OUTPUT_MODE_PS4: {
+            // PS4 mode: process CDC tasks, run mode task (RSA signing), then send HID report
+            cdc_task();
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS4];
+            if (mode && mode->task) mode->task();
             if (tud_hid_ready()) {
                 usbd_send_report(0);
             }
             break;
+        }
 
         case USB_OUTPUT_MODE_XBONE: {
             // Xbox One mode: delegate to mode interface
@@ -1158,19 +1172,27 @@ static bool usbd_send_ps4_report(uint8_t player_index)
     if (!mode || !mode->send_report) return false;
     if (mode->is_ready && !mode->is_ready()) return false;
 
-    // Check for pending event
-    if (player_index >= USB_MAX_PLAYERS || !pending_flags[player_index]) {
+    if (player_index >= USB_MAX_PLAYERS) {
         return false;
     }
 
+    // Static cache for processed output to avoid redundant profile application
+    // when sending continuous reports for stability.
+    static profile_output_t cached_profile_out[USB_MAX_PLAYERS];
+    static uint32_t cached_buttons[USB_MAX_PLAYERS];
+    static bool cache_valid[USB_MAX_PLAYERS] = {false};
+
     const input_event_t* event = &pending_events[player_index];
-    pending_flags[player_index] = false;
 
-    // Apply profile
-    profile_output_t profile_out;
-    uint32_t processed_buttons = apply_usbd_profile(event, &profile_out);
+    // Only re-apply profile if input actually changed or cache is empty
+    if (pending_flags[player_index] || !cache_valid[player_index]) {
+        cached_buttons[player_index] = apply_usbd_profile(event, &cached_profile_out[player_index]);
+        pending_flags[player_index] = false;
+        cache_valid[player_index] = true;
+    }
 
-    return mode->send_report(player_index, event, &profile_out, processed_buttons);
+    // Always delegate to mode implementation to keep counter/timestamp moving
+    return mode->send_report(player_index, event, &cached_profile_out[player_index], cached_buttons[player_index]);
 }
 
 // Send Xbox One report - delegates to mode interface
@@ -1533,6 +1555,7 @@ static const tusb_desc_device_t desc_device_cdc = {
     .bDeviceClass       = TUSB_CLASS_MISC,
     .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
     .bDeviceProtocol    = MISC_PROTOCOL_IAD,
+    .bDescriptorType    = TUSB_DESC_DEVICE,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor           = USB_CDC_VID,
     .idProduct          = USB_CDC_PID,
