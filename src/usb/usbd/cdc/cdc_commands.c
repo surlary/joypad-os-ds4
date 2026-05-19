@@ -1254,7 +1254,7 @@ printf("%d\n<br />", total_size);
 
 for (int i = 0; i < total_size; i++) {
     if (i > 0) {
-        printf(", ");
+        printf(",");
     }
     printf("0x%02X", data[i]);
 }
