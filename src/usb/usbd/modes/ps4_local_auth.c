@@ -293,6 +293,7 @@ bool ps4_local_auth_init(void)
         char rst[48];
         snprintf(rst, sizeof(rst), "RST por=%d psm=%d run=%d wd=%d",
                  had_por, had_psm, had_run, wdog);
+        ps4_event_log_clear();
         ps4_log(rst);
         printf("[ps4_auth] %s wdog_en=%d chip_reset=0x%08lx\n",
                rst, wdog_en, (unsigned long)chip_reset);
