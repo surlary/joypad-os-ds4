@@ -45,7 +45,7 @@ static bool s_log_enabled = false;
 // Conditional log — only writes to flash event log when enabled via settings
 static inline void ps4_log(const char *msg)
 {
-    if (s_log_enabled) ps4_log(msg);
+    if (s_log_enabled) ps4_event_log_write(msg);
 }
 
 // ============================================================================
