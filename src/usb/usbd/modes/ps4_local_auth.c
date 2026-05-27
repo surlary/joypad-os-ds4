@@ -26,7 +26,7 @@
 #include "mbedtls/sha256.h"
 #include "mbedtls/bignum.h"
 #include "mbedtls/md.h"
-#include "pico/platform.h"
+#include "pico.h"
 #include "pico/rand.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
