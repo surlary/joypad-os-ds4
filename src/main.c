@@ -110,9 +110,10 @@ static void __not_in_flash_func(core0_main)(void)
     bool signing = ps4_local_auth_is_signing();
 
     if (first_loop) printf("[joypad] Loop: leds\n");
-    if (!signing) leds_task();
+    leds_task();//if (!signing) leds_task();
+    
     if (first_loop) printf("[joypad] Loop: players\n");
-    if (!signing) players_task();
+    players_task();//if (!signing) players_task();
     if (first_loop) printf("[joypad] Loop: storage\n");
     if (!signing) storage_task();
 
