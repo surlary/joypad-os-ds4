@@ -62,10 +62,10 @@ static volatile bool core1_task_ready = false;
 __attribute__((weak)) void core1_idle_hook(void) {}
 
 // Weak default — overridden by ps4_local_auth.c when PS4 local auth is built.
-// Returns true while Core 1 is mid-sign so main loop can pause non-essential
-// tasks (LEDs / players / storage / input polling / app) to give Core 1
-// exclusive XIP and heap-mutex bandwidth. The USB device task is NOT gated —
-// PS4 still needs status (0xF2) polling answered while sign is in flight.
+// Returns true while Core 1 is mid-sign. Main loop uses this to skip
+// storage_task() only, because flash_safe_execute() would NMI Core 1 out of
+// the MPI loop via the multicore lockout IRQ. mbedTLS code itself runs from
+// SRAM (ram_mbedtls.ld), so XIP / malloc pressure from other tasks is fine.
 __attribute__((weak)) bool ps4_local_auth_is_signing(void) { return false; }
 
 // Core 1 wrapper - initializes flash safety, then waits for and runs actual task
@@ -104,32 +104,33 @@ static void __not_in_flash_func(core0_main)(void)
   static bool first_loop = true;
   while (1)
   {
-    // Skip non-essential tasks while Core 1 is signing — they thrash the XIP
-    // cache and contend for the malloc mutex, causing Core 1 sign to stall.
-    // Output task (USB device) must still run so PS4 status polls get answered.
+    // The only Core 0 task that MUST be gated during a Core 1 sign is
+    // storage_task: it can call flash_safe_execute(), which triggers the
+    // multicore lockout IRQ on Core 1 and yanks it out of mbedTLS mid-MPI.
+    // All other tasks (leds/players/inputs/outputs/app) are XIP-cache and
+    // malloc-mutex pressure only — harmless now that mbedTLS code itself
+    // lives in SRAM (see ram_mbedtls.ld + __not_in_flash_func on ps4_do_sign).
     bool signing = ps4_local_auth_is_signing();
 
     if (first_loop) printf("[joypad] Loop: leds\n");
-    leds_task();//if (!signing) leds_task();
-    
+    leds_task();
+
     if (first_loop) printf("[joypad] Loop: players\n");
-    players_task();//if (!signing) players_task();
+    players_task();
+
     if (first_loop) printf("[joypad] Loop: storage\n");
-    if (!signing) 
-    storage_task();
+    if (!signing) storage_task();
 
     // Poll all input interfaces FIRST so output reads freshest data this iteration
     // (Eliminates one-loop-iteration latency vs polling input after output)
     for (uint8_t i = 0; i < input_count; i++) {
       if (inputs[i] && inputs[i]->task) {
         if (first_loop) printf("[joypad] Loop: input %s\n", inputs[i]->name);
-        if (!signing) 
-          inputs[i]->task();
+        inputs[i]->task();
       }
     }
 
     // Run output interface tasks (reads router state populated by input above)
-    // ALWAYS run — PS4 needs status (0xF2) responses during sign.
     for (uint8_t i = 0; i < output_count; i++) {
       if (outputs[i] && outputs[i]->task) {
         if (first_loop) printf("[joypad] Loop: output %s\n", outputs[i]->name);
@@ -138,7 +139,6 @@ static void __not_in_flash_func(core0_main)(void)
     }
 
     if (first_loop) printf("[joypad] Loop: app\n");
-    if (!signing) 
     app_task();
     first_loop = false;
   }
