@@ -97,8 +97,10 @@ SECTIONS
         /* bit of a hack right now to exclude all floating point and time critical (e.g. memset, memcpy) code from
          * FLASH ... we will include any thing excluded here in .data below by default */
         *(.init)
-        /* PATCH: exclude mbedTLS archives so their .text* is captured by *(.text*) in .data (RAM). */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a:) .text*)
+        /* PATCH: exclude mbedTLS archives (incl. pico_mbedtls SDK shim) so their
+         * .text* is captured by *(.text*) in .data (RAM). Including the shim
+         * avoids RAM↔FLASH veneer calls across the 256 MB gap during sign. */
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a: *libpico_mbedtls.a:) .text*)
         *(.fini)
         /* Pull all c'tors into .text */
         *crtbegin.o(.ctors)
@@ -139,8 +141,9 @@ SECTIONS
     } > FLASH
 
     .rodata : {
-        /* PATCH: exclude mbedTLS archives so their .rodata* is captured by *(.rodata*) in .data (RAM). */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a:) .rodata*)
+        /* PATCH: same exclusion for rodata so all mbedTLS data tables (SHA256
+         * round constants, RSA tables, OID strings) live in RAM next to code. */
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a: *libpico_mbedtls.a:) .rodata*)
         . = ALIGN(4);
         *(SORT_BY_ALIGNMENT(SORT_BY_NAME(.flashdata*)))
         . = ALIGN(4);
