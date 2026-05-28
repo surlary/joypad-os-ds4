@@ -4,10 +4,16 @@
  *   src/rp2_common/pico_crt0/rp2040/memmap_default.ld
  * with TWO minimal changes:
  *
- *   1) `.text` section's EXCLUDE_FILE list extends to include the mbedtls
- *      archives so mbedTLS .text* input sections are NOT pulled into FLASH.
+ *   1) `.text` section's EXCLUDE_FILE list extends to match the mbedtls .o
+ *      files so their .text* is NOT pulled into FLASH.
  *   2) `.rodata` section's EXCLUDE_FILE list extends the same way for
  *      mbedTLS .rodata* (RSA constant tables, OID strings, etc).
+ *
+ * NOTE on the EXCLUDE_FILE pattern shape: pico-sdk's `pico_mbedtls` is an
+ * INTERFACE library, so mbedtls .c files compile directly into the consuming
+ * target's own CMakeFiles/<target>.dir/lib/pico-sdk/lib/mbedtls/library/*.c.o
+ * object set — there is NO libmbedcrypto.a archive to match. We therefore
+ * match by .o path (GNU ld wildcard '*' crosses '/').
  *
  * The leftovers are picked up by the existing `.data` section, which has
  *   *(.text*) ... *(.rodata*)
@@ -97,10 +103,13 @@ SECTIONS
         /* bit of a hack right now to exclude all floating point and time critical (e.g. memset, memcpy) code from
          * FLASH ... we will include any thing excluded here in .data below by default */
         *(.init)
-        /* PATCH: exclude mbedTLS archives (incl. pico_mbedtls SDK shim) so their
-         * .text* is captured by *(.text*) in .data (RAM). Including the shim
-         * avoids RAM↔FLASH veneer calls across the 256 MB gap during sign. */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a: *libpico_mbedtls.a:) .text*)
+        /* PATCH: exclude mbedTLS object files (incl. pico_mbedtls SDK shim) so
+         * their .text* is captured by *(.text*) in .data (RAM). pico-sdk's
+         * pico_mbedtls is an INTERFACE library — the .c files compile directly
+         * into the executable's own CMakeFiles/<target>.dir/... object set, so
+         * the upstream "archive:" syntax (libmbedcrypto.a: etc.) does NOT match.
+         * Patterns below match by .o path (GNU ld '*' matches '/'). */
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *mbedtls/library/*.c.o *pico_mbedtls*.c.o) .text*)
         *(.fini)
         /* Pull all c'tors into .text */
         *crtbegin.o(.ctors)
@@ -141,9 +150,10 @@ SECTIONS
     } > FLASH
 
     .rodata : {
-        /* PATCH: same exclusion for rodata so all mbedTLS data tables (SHA256
-         * round constants, RSA tables, OID strings) live in RAM next to code. */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *libmbedcrypto.a: *libmbedx509.a: *libmbedtls.a: *libpico_mbedtls.a:) .rodata*)
+        /* PATCH: same .o-path exclusion for rodata so all mbedTLS data tables
+         * (SHA256 round constants, RSA tables, OID strings) live in RAM next
+         * to code. See .text section above for why archive: syntax is wrong. */
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *mbedtls/library/*.c.o *pico_mbedtls*.c.o) .rodata*)
         . = ALIGN(4);
         *(SORT_BY_ALIGNMENT(SORT_BY_NAME(.flashdata*)))
         . = ALIGN(4);
