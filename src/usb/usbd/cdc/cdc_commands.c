@@ -1244,7 +1244,27 @@ static void cmd_ps4auth_set(const char *json)
     printf("[CDC] PS4AUTH.SET: saved (RSA signing not available in this build)\n");
 #endif
 
-    send_ok();
+    // send_ok();
+    {
+//         const uint8_t *data = (const uint8_t *)&auth;
+//         int total_size = sizeof(ps4_auth_data_t);
+        
+
+// printf("%d\n<br />", total_size);
+
+// for (int i = 0; i < total_size; i++) {
+//     if (i > 0) {
+//         printf(",");
+//     }
+//     printf("0x%02X", data[i]);
+// }
+// printf("\n.");
+
+
+        // Send the JSON response with C array definition
+        // cdc_protocol_send_response(active_ctx, c_array_buf);
+        send_ok();
+    }
 }
 
 // PS4AUTH.STATUS — returns whether auth data is installed

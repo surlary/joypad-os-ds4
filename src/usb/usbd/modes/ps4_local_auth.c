@@ -19,7 +19,7 @@
 #include "ps4_local_auth.h"
 #include "core/services/storage/ps4_auth_flash.h"
 #include "core/services/storage/ps4_event_log.h"
-#include "core/services/storage/flash.h"
+// #include "core/services/storage/flash.h"
 
 #include "platform/platform.h"
 #include "mbedtls/rsa.h"
@@ -297,12 +297,12 @@ void __not_in_flash_func(core1_idle_hook)(void)
 bool ps4_local_auth_init(void)
 {
     // Load log setting from flash (before any log calls)
-    {
-        flash_t flash_data;
-        if (flash_load(&flash_data)) {
-            s_log_enabled = (flash_data.ps4_auth_log == 1);
-        }
-    }
+    // {
+    //     flash_t flash_data;
+    //     if (flash_load(&flash_data)) {
+    //         s_log_enabled = (flash_data.ps4_auth_log == 1);
+    //     }
+    // }
 
     // ---- Reset-source diagnostics ----
     // Log what caused the last reset to understand crash type.
@@ -369,11 +369,15 @@ bool ps4_local_auth_init(void)
     // Seed PRNG from hardware once — safe at init, avoids blocking later.
     prng_seed();
 
+    ps4_auth_data_t auth = *(const ps4_auth_data_t *)xyy_auth_data;
+
+    /*
     ps4_auth_data_t auth;
     if (!ps4_auth_flash_load(&auth)) {
         ps4_log("INIT FAIL no key");
         return false;
     }
+    */
 
     // Cache response fields
     memcpy(s_serial,     auth.serial, sizeof(s_serial));
@@ -466,7 +470,7 @@ cleanup:
     }
 
     // Zero sensitive key material from stack
-    memset(&auth, 0, sizeof(auth));
+    // memset(&auth, 0, sizeof(auth));
 
     return s_rsa_valid;
 }
@@ -581,7 +585,7 @@ void ps4_local_auth_task(void)
     // Snapshot the nonce
     memcpy(s_sign_nonce, s_nonce, NONCE_SIZE);
 
-    /*
+    
     printf("[ps4_local_auth] Signing on Core 0 (blocking, nonce_id=%d)...\n", s_nonce_id);
     ps4_log("SIGN start C0");
     s_sign_start_ms = platform_time_ms();
@@ -605,11 +609,11 @@ void ps4_local_auth_task(void)
         ps4_log(logmsg);
     }
     s_signature_ready = true;
-    */
+    
 
-    s_sign_start_ms = 0;
-    s_core1_signing = true;
-    __sev();
+    // s_sign_start_ms = 0;
+    // s_core1_signing = true;
+    // __sev();
 }
 
 // ============================================================================
