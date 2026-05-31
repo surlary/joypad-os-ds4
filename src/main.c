@@ -97,13 +97,69 @@ static void core1_wrapper(void) {
   }
 }
 
+// === [TEMP] Main-loop tick instrumentation ===
+// Drives a 1ms hardware alarm (repeating timer) that increments an ISR-only
+// counter.  Every main loop iteration we read the counter and track how many
+// 1ms ticks elapsed between iterations — i.e. how many "would-be HID ticks"
+// the main loop slept through.  Reports once per second.
+//
+// gap=1  → loop kept up with 1kHz cadence
+// gap>1  → loop iteration took >1ms; that many 1kHz ticks were missed
+// loop/s → actual main loop frequency
+//
+// Remove this block once we've validated whether main loop iteration ever
+// exceeds the PS4 host's 1ms bInterval (especially during RSA signing).
+static volatile uint32_t s_tick_alarm_count = 0;
+static repeating_timer_t s_tick_alarm_timer;
+static bool __not_in_flash_func(tick_alarm_cb)(repeating_timer_t* rt) {
+  (void)rt;
+  s_tick_alarm_count++;
+  return true;
+}
+static void tick_alarm_init(void) {
+  // Negative interval = "1000us between starts", steady cadence regardless of
+  // callback duration.  Default alarm pool is on whichever core called this —
+  // call from Core 0 so the ISR fires on Core 0 (same core as main loop).
+  add_repeating_timer_us(-1000, tick_alarm_cb, NULL, &s_tick_alarm_timer);
+  printf("[tick] alarm armed @ 1kHz\n");
+}
+static inline void __not_in_flash_func(tick_alarm_sample)(void) {
+  static uint32_t last_seen = 0;
+  static uint32_t last_print_us = 0;
+  static uint32_t loop_iters = 0;
+  static uint32_t max_gap = 0;
+  static uint32_t last_alarm_total = 0;
+
+  uint32_t now = s_tick_alarm_count;
+  uint32_t gap = now - last_seen;
+  last_seen = now;
+  if (gap > max_gap) max_gap = gap;
+  loop_iters++;
+
+  uint32_t now_us = time_us_32();
+  if (now_us - last_print_us >= 1000000u) {
+    uint32_t alarm_delta = now - last_alarm_total;
+    printf("[tick] alarm=%u/s loop=%u/s max_gap=%u (~%uus worst iter)\n",
+           (unsigned)alarm_delta, (unsigned)loop_iters,
+           (unsigned)max_gap, (unsigned)(max_gap * 1000));
+    last_print_us = now_us;
+    last_alarm_total = now;
+    loop_iters = 0;
+    max_gap = 0;
+  }
+}
+// === [/TEMP] ===
+
 // Core 0 main loop - pinned in SRAM for consistent timing
 static void __not_in_flash_func(core0_main)(void)
 {
   printf("[joypad] Entering main loop\n");
+  tick_alarm_init();
   static bool first_loop = true;
   while (1)
   {
+    tick_alarm_sample();
+
     // mbedTLS code+rodata now lives in RAM (memmap_mbedtls_ram.ld), so Core 0
     // XIP traffic from inputs/app no longer stalls Core 1's RSA-PSS sign.
     // The only Core 0 task that still MUST be gated is storage_task: it can
