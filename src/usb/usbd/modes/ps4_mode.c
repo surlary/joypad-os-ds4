@@ -226,8 +226,11 @@ static bool ps4_mode_send_report(uint8_t player_index,
 
 static void ps4_mode_handle_output(uint8_t report_id, const uint8_t* data, uint16_t len)
 {
-    // PS4 output report (rumble/LED) - Report ID 5
-    if (report_id == PS4_REPORT_ID_OUTPUT && len >= sizeof(ps4_out_report_t)) {
+    // PS4 output report (rumble/LED) - Report ID 5.
+    // When delivered via the interrupt OUT endpoint, TinyUSB passes
+    // report_id=0 and leaves the actual ID as data[0]; dispatch on the buffer.
+    (void)report_id;
+    if (len >= sizeof(ps4_out_report_t) && data[0] == PS4_REPORT_ID_OUTPUT) {
         memcpy(&ps4_output, data, sizeof(ps4_out_report_t));
         ps4_output_available = true;
     }
