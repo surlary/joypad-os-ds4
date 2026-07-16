@@ -1272,6 +1272,10 @@ static void cmd_ps4auth_status(const char *json)
 {
     (void)json;
 
+    // Get platform serial number
+    char platform_serial[17];
+    platform_get_serial(platform_serial, sizeof(platform_serial));
+
     // Load once — reuse for both installed check and serial
     ps4_auth_data_t auth;
     bool installed = ps4_auth_flash_load(&auth);
@@ -1288,12 +1292,14 @@ static void cmd_ps4auth_status(const char *json)
             snprintf(serial_hex + i * 2, 3, "%02X", auth.serial[i]);
         }
         snprintf(response_buf, sizeof(response_buf),
-                 "{\"installed\":true,\"active\":%s,\"serial\":\"%s\"}",
+                 "{\"installed\":true,\"active\":%s,\"serial\":\"%s\",\"platform_serial\":\"%s\"}",
                  active ? "true" : "false",
-                 serial_hex);
+                 serial_hex,
+                 platform_serial);
     } else {
         snprintf(response_buf, sizeof(response_buf),
-                 "{\"installed\":false,\"active\":false}");
+                 "{\"installed\":false,\"active\":false,\"platform_serial\":\"%s\"}",
+                 platform_serial);
     }
     send_json(response_buf);
 }
