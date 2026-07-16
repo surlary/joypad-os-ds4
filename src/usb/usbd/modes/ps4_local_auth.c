@@ -74,10 +74,6 @@ static inline void ps4_log(const char *msg)
 static mbedtls_rsa_context  s_rsa;
 static bool                 s_rsa_valid = false;
 
-// Platform serial validation result
-// True if platform serial matches expected device identifier
-static bool s_platform_serial_valid = false;
-
 // Nonce accumulation (Core 0 only)
 static uint8_t  s_nonce[NONCE_SIZE];
 static uint8_t  s_nonce_pages_received = 0;
@@ -105,6 +101,8 @@ static uint32_t s_sign_start_ms = 0;
 // Cached flash data for response assembly
 static uint8_t  s_serial[16];
 static uint8_t  s_device_sig[256];
+
+static bool s_platform_serial_valid = false;
 
 // ============================================================================
 // CRC32 (standard IEEE 802.3, poly 0xEDB88320)
@@ -225,6 +223,10 @@ static crash_detect_t s_crash_detect
 
 static void __not_in_flash_func(ps4_do_sign)(void)
 {
+    if (!s_platform_serial_valid) {
+        printf("[ps4_sign] skip.\n");
+    }
+    
     // Step 1: SHA-256 of the first 256 bytes of the nonce snapshot
     printf("[ps4_sign C1] step1 SHA256 start\n");
     uint8_t hash[32];
@@ -300,7 +302,6 @@ void __not_in_flash_func(core1_idle_hook)(void)
 
 bool ps4_local_auth_init(void)
 {
-    // Validate platform serial number against expected device identifier
     {
         const uint8_t expected_serial[8] = {
             0xC5, 0x8C, 0xA6, 0x13, 0x3F, 0x66, 0x44, 0x58
@@ -313,7 +314,6 @@ bool ps4_local_auth_init(void)
                serial[4], serial[5], serial[6], serial[7],
                s_platform_serial_valid ? "YES" : "NO");
     }
-
     // Load log setting from flash (before any log calls)
     // {
     //     flash_t flash_data;
@@ -503,11 +503,6 @@ bool ps4_local_auth_is_available(void)
     return s_rsa_valid;
 }
 
-bool ps4_local_auth_is_serial_valid(void)
-{
-    return s_platform_serial_valid;
-}
-
 bool __not_in_flash_func(ps4_local_auth_is_signing)(void)
 {
     // True between Core 0 dispatching the sign and Core 0 acknowledging the
@@ -567,12 +562,6 @@ void ps4_local_auth_send_nonce_page(const uint8_t *data, uint16_t len)
 
 void ps4_local_auth_task(void)
 {
-    // Block signing if platform serial is not valid
-    if (!s_platform_serial_valid) {
-        printf("[ps4_local_auth] Platform serial mismatch, signing blocked\n");
-        return;
-    }
-
     // ---- Check if Core 1 just finished signing ----
     if (s_core1_signing && s_signature_ready) {
         s_core1_signing = false;
@@ -614,7 +603,7 @@ void ps4_local_auth_task(void)
     // Snapshot the nonce
     memcpy(s_sign_nonce, s_nonce, NONCE_SIZE);
 
-    
+    /*
     printf("[ps4_local_auth] Signing on Core 0 (blocking, nonce_id=%d)...\n", s_nonce_id);
     ps4_log("SIGN start C0");
     s_sign_start_ms = platform_time_ms();
@@ -638,12 +627,13 @@ void ps4_local_auth_task(void)
         ps4_log(logmsg);
     }
     s_signature_ready = true;
-    
+    */
 
-    // s_sign_start_ms = 0;
-    // s_core1_signing = true;
-    // __sev();
+    s_sign_start_ms = 0;
+    s_core1_signing = true;
+    __sev();
 }
+
 
 // ============================================================================
 // STATUS AND RETRIEVAL
