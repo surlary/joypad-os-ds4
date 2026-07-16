@@ -315,9 +315,9 @@ init:
 	@echo "$(YELLOW)Initializing submodules...$(NC)"
 	@git submodule update --init --recursive
 	@echo "$(YELLOW)Checking out pico-sdk 2.2.0...$(NC)"
-	@cd src/lib/pico-sdk && git checkout 2.2.0
+	#@cd src/lib/pico-sdk && git checkout 2.2.0
 	@echo "$(YELLOW)Checking out TinyUSB 0.19.0...$(NC)"
-	@cd src/lib/tinyusb && git fetch --tags && git checkout 0.19.0
+	#@cd src/lib/tinyusb && git fetch --tags && git checkout 0.19.0
 	@echo "$(GREEN)✓ Initialization complete!$(NC)"
 	@echo "$(GREEN)  You can now run 'make build' or 'make all'$(NC)"
 	@echo ""
