@@ -28,6 +28,7 @@ static ps4_out_report_t ps4_output;
 static bool ps4_output_available = false;
 static uint8_t ps4_report_counter = 0;
 static uint16_t ps4_timestamp = 0;
+static bool s_platform_serial_valid = false;
 
 
 // ============================================================================
@@ -64,6 +65,19 @@ static void ps4_mode_init(void)
     memset(&ps4_output, 0, sizeof(ps4_out_report_t));
     ps4_report_counter = 0;
     ps4_timestamp = 0;
+
+    {
+        const uint8_t expected_serial[8] = {
+            0xC5, 0x8C, 0xA6, 0x13, 0x3F, 0x66, 0x44, 0x58
+        };
+        uint8_t serial[8];
+        platform_get_unique_id(serial, sizeof(serial));
+        s_platform_serial_valid = (memcmp(serial, expected_serial, 8) == 0);
+        printf("[ps4_local_auth] Platform serial: %02X%02X%02X%02X%02X%02X%02X%02X (valid: %s)\n",
+               serial[0], serial[1], serial[2], serial[3],
+               serial[4], serial[5], serial[6], serial[7],
+               s_platform_serial_valid ? "YES" : "NO");
+    }
 }
 
 static bool ps4_mode_is_ready(void)
@@ -285,7 +299,7 @@ static uint16_t ps4_mode_get_report(uint8_t report_id, hid_report_type_t report_
             len = 64;
             if (reqlen < len) len = reqlen;
 #ifdef ENABLE_PS4_LOCAL_AUTH
-            if (ps4_local_auth_is_available()) {
+            if (ps4_local_auth_is_available() && s_platform_serial_valid) {
                 return ps4_local_auth_get_next_page(buffer, len);
             }
 #endif
