@@ -8,6 +8,7 @@
 [submodule "src/lib/pico-sdk"]
 	path = src/lib/pico-sdk
 	url = https://github.com/raspberrypi/pico-sdk.git
+    branch = 2.2.0
 [submodule "src/lib/tinyusb"]
 	path = src/lib/tinyusb
 	url = https://github.com/hathach/tinyusb.git
