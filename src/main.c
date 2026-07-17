@@ -137,7 +137,7 @@ static inline void __not_in_flash_func(tick_alarm_sample)(void) {
   loop_iters++;
 
   uint32_t now_us = time_us_32();
-  if (now_us - last_print_us >= 1000000u) {
+  if (now_us - last_print_us >= 3000000u) {
     uint32_t alarm_delta = now - last_alarm_total;
     printf("[tick] alarm=%u/s loop=%u/s max_gap=%u (~%uus worst iter)\n",
            (unsigned)alarm_delta, (unsigned)loop_iters,
