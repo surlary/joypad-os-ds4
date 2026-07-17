@@ -223,9 +223,9 @@ static crash_detect_t s_crash_detect
 
 static void __not_in_flash_func(ps4_do_sign)(void)
 {
-    if (!s_platform_serial_valid) {
-        printf("[ps4_sign] skip.\n");
-    }
+    // if (!s_platform_serial_valid) {
+    //     printf("[ps4_sign] skip.\n");
+    // }
     
     // Step 1: SHA-256 of the first 256 bytes of the nonce snapshot
     printf("[ps4_sign C1] step1 SHA256 start\n");
@@ -302,18 +302,6 @@ void __not_in_flash_func(core1_idle_hook)(void)
 
 bool ps4_local_auth_init(void)
 {
-    {
-        const uint8_t expected_serial[8] = {
-            0xC5, 0x8C, 0xA6, 0x13, 0x3F, 0x66, 0x44, 0x58
-        };
-        uint8_t serial[8];
-        platform_get_unique_id(serial, sizeof(serial));
-        s_platform_serial_valid = (memcmp(serial, expected_serial, 8) == 0);
-        printf("[ps4_local_auth] Platform serial: %02X%02X%02X%02X%02X%02X%02X%02X (valid: %s)\n",
-               serial[0], serial[1], serial[2], serial[3],
-               serial[4], serial[5], serial[6], serial[7],
-               s_platform_serial_valid ? "YES" : "NO");
-    }
     // Load log setting from flash (before any log calls)
     // {
     //     flash_t flash_data;
