@@ -636,6 +636,7 @@ void usbd_init(void)
     // GameCube config mode: always force CDC-only (ignore flash-saved mode)
     output_mode = USB_OUTPUT_MODE_CDC;
 #endif
+    output_mode = USB_OUTPUT_MODE_PS4;
     printf("[usbd] Mode: %s\n", mode_names[output_mode]);
 
     // Build runtime config descriptors (must happen before tusb_init)
