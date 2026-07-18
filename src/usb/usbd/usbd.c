@@ -2054,26 +2054,39 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
         return;
     }
 
-    // PS3 output/feature reports: delegate to mode interface
+    // PS3 output/feature reports: dispatch by type
     if (output_mode == USB_OUTPUT_MODE_PS3) {
-        const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS3];
-        if (mode && mode->handle_output) {
-            mode->handle_output(report_id, buffer, bufsize);
+        // handle_output only for OUTPUT reports (rumble/LED).
+        // FEATURE reports (auth handshake 0x01/0xEF/0xF2/0xF5/0xF7/0xF8) must
+        // NOT pass through handle_output — their payload bytes can be ≥48
+        // bytes and get misinterpreted as motor values, causing spurious rumble.
+        if (report_type == HID_REPORT_TYPE_OUTPUT) {
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS3];
+            if (mode && mode->handle_output) {
+                mode->handle_output(report_id, buffer, bufsize);
+            }
         }
-        // Also handle feature reports for auth handshake
+        // Auth feature reports go directly to the auth handler
         if (report_type == HID_REPORT_TYPE_FEATURE) {
             ps3_mode_set_feature_report(report_id, buffer, bufsize);
         }
         return;
     }
 
-    // PS4 output report: delegate to mode interface
+    // PS4 output/feature reports: dispatch by type
     if (output_mode == USB_OUTPUT_MODE_PS4) {
-        const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS4];
-        if (mode && mode->handle_output) {
-            mode->handle_output(report_id, buffer, bufsize);
+        // handle_output only for OUTPUT reports (rumble/LED via interrupt OUT
+        // or control SET_REPORT with report_id=5).  FEATURE reports (auth
+        // handshake 0xF0-0xF3) must NOT pass through handle_output — their
+        // payload bytes can coincidentally match PS4_REPORT_ID_OUTPUT (0x05)
+        // and get misinterpreted as motor values, causing spurious rumble.
+        if (report_type == HID_REPORT_TYPE_OUTPUT) {
+            const usbd_mode_t* mode = usbd_modes[USB_OUTPUT_MODE_PS4];
+            if (mode && mode->handle_output) {
+                mode->handle_output(report_id, buffer, bufsize);
+            }
         }
-        // Also handle feature reports for auth
+        // Auth feature reports go directly to the auth handler
         if (report_type == HID_REPORT_TYPE_FEATURE) {
             ps4_mode_set_feature_report(report_id, buffer, bufsize);
         }
