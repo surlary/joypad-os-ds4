@@ -227,19 +227,17 @@ static bool ps4_mode_send_report(uint8_t player_index,
 static void ps4_mode_handle_output(uint8_t report_id, const uint8_t* data, uint16_t len)
 {
     // PS4 output report (rumble/LED) - Report ID 5.
-    // When delivered via the interrupt OUT endpoint, TinyUSB passes
-    // report_id=0 and leaves the actual ID as data[0]; dispatch on the buffer.
-    (void)report_id;
+    // Two delivery paths:
+    //   1. Interrupt OUT endpoint: TinyUSB passes report_id=0, actual ID in data[0]
+    //   2. Control SET_REPORT: TinyUSB passes report_id=5, data[0] is also 0x05
+    // Accept either convention, but reject any report that isn't clearly ID 5.
+    // (usbd.c now gates on HID_REPORT_TYPE_OUTPUT, so feature/auth reports
+    // should never reach here — this check is a second line of defense.)
+    if (report_id != PS4_REPORT_ID_OUTPUT && report_id != 0) return;
     if (len >= sizeof(ps4_out_report_t) && data[0] == PS4_REPORT_ID_OUTPUT) {
         memcpy(&ps4_output, data, sizeof(ps4_out_report_t));
         ps4_output_available = true;
     }
-
-    // PS4 auth feature reports (set)
-#ifndef DISABLE_USB_HOST
-    // Note: Feature reports are typically handled via tud_hid_set_report_cb
-    // This handle_output is for interrupt OUT endpoint reports
-#endif
 }
 
 static uint8_t ps4_mode_get_rumble(void)
