@@ -1,0 +1,114 @@
+name: Build USB2USB Pico llm
+
+on:
+  workflow_dispatch:
+    description: 'Manually trigger usb2usb_pico build'
+
+jobs:
+  build-usb2usb-pico:
+    name: Build usb2usb_pico (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Cache Pico SDK and submodules
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/lib/pico-sdk
+            src/lib/tinyusb
+            src/lib/tusb_xinput
+            src/lib/joybus-pio
+            src/lib/SNESpad
+            src/lib/Pico-PIO-USB
+          key: ${{ runner.os }}-submodules-v2-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-submodules-v2-
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential
+
+      - name: Setup ARM GCC Toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
+
+      - name: Verify toolchain installation
+        run: |
+          echo "=== Toolchain Versions ==="
+          arm-none-eabi-gcc --version
+          cmake --version
+          make --version
+          git --version
+
+      - name: Pin submodule versions
+        run: |
+          echo "=== Pinning submodule versions ==="
+          # Pin pico-sdk to 2.2.0 and tinyusb to 0.19.0
+          # (the superproject may record different commits; these are the
+          #  versions tested and supported by the build system)
+          cd src/lib/pico-sdk && git fetch --tags origin && git checkout 2.2.0
+          cd src/lib/tinyusb && git fetch --tags origin && git checkout 0.19.0
+          echo "=== Submodule status ==="
+          git submodule status
+
+      - name: Cache CMake build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/build
+          key: ${{ runner.os }}-build-${{ hashFiles('src/CMakeLists.txt', 'CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Build usb2usb_pico
+        id: build
+        run: |
+
+          echo "static ${{ secrets.KEY }}" >> src/usb/usbd/modes/ps4_local_auth.h
+          echo "=== Building usb2usb_pico ==="
+          make usb2usb_pico usb2usb_rp2040zero
+          # make usb2usb_pico
+          
+          echo "=== Build output ==="
+          ls -lh releases/*.uf2
+
+          #find . -name joypad_usb_rp2040zero.elf
+          #arm-none-eabi-objdump -d src/build/joypad_usb_rp2040zero.elf|grep -A 30 "<__wrap_malloc>"
+          
+          # Extract firmware filename
+          FIRMWARE_FILE=$(ls releases/*.uf2 | head -n 1)
+          echo "firmware_file=${FIRMWARE_FILE}" >> $GITHUB_OUTPUT
+          echo "firmware_name=$(basename ${FIRMWARE_FILE})" >> $GITHUB_OUTPUT
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: failure()
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usb2usb_pico_firmware
+          path: |
+            releases/*.uf2
+            src/usb/usbd/modes/ps4_local_auth.h
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build summary
+        run: |
+          echo "### ✅ Build Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`usb2usb_pico\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** Linux (Ubuntu)" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          #git diff HEAD~1 HEAD >> $GITHUB_STEP_SUMMARY
+          
